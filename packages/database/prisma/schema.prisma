@@ -1,0 +1,564 @@
+// LB Team — modelagem completa (PostgreSQL)
+// Individualização: templates/grupos + sobrescritas por usuária
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  TRAINER
+  NUTRITIONIST
+  ADMIN
+}
+
+enum StudentGoal {
+  WEIGHT_LOSS
+  HYPERTROPHY
+}
+
+enum FitnessLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum WeeklyFrequencyTarget {
+  TWO
+  THREE
+  FOUR
+  FIVE
+  SIX
+}
+
+enum DispositionToday {
+  TIRED
+  NORMAL
+  ENERGETIC
+  IN_PAIN
+  NO_TIME
+}
+
+enum EngagementTone {
+  ON_FIRE
+  FREQUENCY_DROP
+  RETURNED_AFTER_BREAK
+  LEVEL_UP
+  STREAK_LOST
+  WEEKLY_ALMOST_DONE
+  STREAK_AT_RISK
+  STREAK_KEPT
+  DEFAULT
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  phone        String?
+  birthDate    DateTime? @map("birth_date")
+  role         Role      @default(STUDENT)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  profile UserProfile?
+
+  studentProfile StudentProfile?
+
+  trainerOf   TrainerStudentLink[] @relation("TrainerUser")
+  studentOf   TrainerStudentLink[] @relation("StudentTrainer")
+
+  nutritionistOf NutritionistStudentLink[] @relation("NutritionistUser")
+  patientOf      NutritionistStudentLink[] @relation("StudentNutritionist")
+
+  exercisesAuthored   Exercise[]            @relation("ExerciseAuthor")
+  workoutTemplates    WorkoutTemplate[]     @relation("WorkoutTemplateAuthor")
+  privateWorkoutTemplates WorkoutTemplate[] @relation("PrivateWorkoutTemplates")
+  workoutGroupsOwned  WorkoutGroup[]
+  nutritionTemplates  NutritionTemplate[]   @relation("NutritionTemplateAuthor")
+  nutritionGroupsOwned NutritionGroup[]
+
+  workoutGroupMemberships  WorkoutGroupUser[]
+  nutritionGroupMemberships NutritionGroupUser[]
+
+  /// Treinos nomeados atribuídos à aluna por um personal (plano individual com N fichas).
+  workoutSlotsReceived StudentWorkoutSlot[] @relation("WorkoutSlotStudent")
+  workoutSlotsAuthored StudentWorkoutSlot[] @relation("WorkoutSlotTrainer")
+
+  workoutCompletions WorkoutCompletion[]
+
+  activityLogs    ActivityLog[]
+  notifications   Notification[]
+  dailyCheckins   DailyCheckin[]
+  userLevel       UserLevel?
+  progressHistory ProgressHistory[]
+  weeklyFrequencyLogs WeeklyFrequencyLog[]
+  streakState     StreakState?
+  streakLogs      StreakLog[]
+  nutritionLogs   NutritionLog[]
+}
+
+model UserProfile {
+  userId          String    @id @map("user_id")
+  weightKg        Float?    @map("weight_kg")
+  heightCm        Float?    @map("height_cm")
+  termsAcceptedAt DateTime? @map("terms_accepted_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StudentProfile {
+  userId              String   @id @map("user_id")
+  goal                StudentGoal?
+  fitnessLevel        FitnessLevel?           @map("fitness_level")
+  weeklyTarget        WeeklyFrequencyTarget? @map("weekly_target")
+  limitationsNotes    String?  @map("limitations_notes") @db.Text
+  dailyTimeMinutes    Int?     @map("daily_time_minutes")
+  locationHome        Boolean? @map("location_home")
+  locationGym         Boolean? @map("location_gym")
+  equipmentNotes      String?  @map("equipment_notes") @db.Text
+  focusRegions        String?  @map("focus_regions") @db.Text
+  energyCycleNotes    String?  @map("energy_cycle_notes") @db.Text
+  preferencesNotes    String?  @map("preferences_notes") @db.Text
+  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
+  dispositionDefault  String?  @map("disposition_default")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  physicalLimitations PhysicalLimitation[]
+  onboardingAnswers   OnboardingAnswer[]
+  weeklySlots         WeeklyAvailability[]
+
+  workoutOverride UserWorkoutOverride?
+  nutritionOverride UserNutritionOverride?
+}
+
+model PhysicalLimitation {
+  id          String @id @default(cuid())
+  studentId   String @map("student_id")
+  category    String
+  description String @db.Text
+
+  student StudentProfile @relation(fields: [studentId], references: [userId], onDelete: Cascade)
+}
+
+model OnboardingAnswer {
+  id        String @id @default(cuid())
+  studentId String @map("student_id")
+  key       String
+  value     String @db.Text
+
+  student StudentProfile @relation(fields: [studentId], references: [userId], onDelete: Cascade)
+
+  @@unique([studentId, key])
+}
+
+model WeeklyAvailability {
+  id            String @id @default(cuid())
+  studentUserId String @map("student_user_id")
+  weekday       Int
+  minutes       Int?
+
+  student StudentProfile @relation(fields: [studentUserId], references: [userId], onDelete: Cascade)
+}
+
+model TrainerStudentLink {
+  trainerId String   @map("trainer_id")
+  studentId String   @map("student_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  trainer User @relation("TrainerUser", fields: [trainerId], references: [id], onDelete: Cascade)
+  student User @relation("StudentTrainer", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([trainerId, studentId])
+}
+
+model NutritionistStudentLink {
+  nutritionistId String   @map("nutritionist_id")
+  studentId      String   @map("student_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  nutritionist User @relation("NutritionistUser", fields: [nutritionistId], references: [id], onDelete: Cascade)
+  student      User @relation("StudentNutritionist", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([nutritionistId, studentId])
+}
+
+model Exercise {
+  id                 String  @id @default(cuid())
+  trainerId          String  @map("trainer_id")
+  name               String
+  category           String
+  muscleGroup        String  @map("muscle_group")
+  level              FitnessLevel
+  type               String
+  description        String? @db.Text
+  instructions       String? @db.Text
+  videoUrl           String? @map("video_url")
+  /// Arquivo enviado (servido em GET /files/{videoFileKey}), ex.: exercises/abc.mp4
+  videoFileKey       String? @map("video_file_key")
+  imageUrl           String? @map("image_url")
+  equipment          String? @db.Text
+  contraindications  String? @db.Text @map("contraindications")
+  tags               String? @db.Text
+  technicalNotes     String? @db.Text @map("technical_notes")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  trainer User @relation("ExerciseAuthor", fields: [trainerId], references: [id], onDelete: Cascade)
+
+  substitutionsFrom ExerciseSubstitution[] @relation("PrimaryExercise")
+  substitutionsTo   ExerciseSubstitution[] @relation("SubstituteExercise")
+
+  workoutExercises     WorkoutExercise[]
+  exerciseCompletions  ExerciseCompletion[]
+}
+
+model ExerciseSubstitution {
+  id                   String @id @default(cuid())
+  primaryExerciseId    String @map("primary_exercise_id")
+  substituteExerciseId String @map("substitute_exercise_id")
+
+  primary    Exercise @relation("PrimaryExercise", fields: [primaryExerciseId], references: [id], onDelete: Cascade)
+  substitute Exercise @relation("SubstituteExercise", fields: [substituteExerciseId], references: [id], onDelete: Cascade)
+
+  @@unique([primaryExerciseId, substituteExerciseId])
+}
+
+model WorkoutTemplate {
+  id          String   @id @default(cuid())
+  trainerId   String   @map("trainer_id")
+  name        String
+  description String?  @db.Text
+  objective   StudentGoal?
+  level       FitnessLevel?
+  frequency   WeeklyFrequencyTarget?
+  /// Se preenchido, a ficha não aparece na aba geral "Modelos de treino" — só via treinos desta aluna.
+  privateForStudentId String? @map("private_for_student_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  trainer User @relation("WorkoutTemplateAuthor", fields: [trainerId], references: [id], onDelete: Cascade)
+  privateForStudent User? @relation("PrivateWorkoutTemplates", fields: [privateForStudentId], references: [id], onDelete: Cascade)
+
+  days    WorkoutDay[]
+  groups  WorkoutGroup[]
+  overrides UserWorkoutOverride[]
+  studentSlots StudentWorkoutSlot[]
+  completions WorkoutCompletion[]
+}
+
+/// Vários treinos (modelos) nomeados para a mesma aluna, ex.: "Treino 1 - Peito", "Treino 2 - Costas".
+model StudentWorkoutSlot {
+  id         String   @id @default(cuid())
+  studentId  String   @map("student_id")
+  trainerId  String   @map("trainer_id")
+  templateId String   @map("template_id")
+  label      String
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  student  User            @relation("WorkoutSlotStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  trainer  User            @relation("WorkoutSlotTrainer", fields: [trainerId], references: [id], onDelete: Cascade)
+  template WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, sortOrder])
+}
+
+model WorkoutDay {
+  id         String @id @default(cuid())
+  templateId String @map("template_id")
+  dayIndex   Int    @map("day_index")
+  name       String
+
+  template  WorkoutTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  exercises WorkoutExercise[]
+}
+
+model WorkoutExercise {
+  id              String  @id @default(cuid())
+  dayId           String  @map("day_id")
+  exerciseId      String  @map("exercise_id")
+  orderIndex      Int     @map("order_index")
+  sets            Int     @default(3)
+  reps            String  @default("12")
+  durationSec     Int?    @map("duration_sec")
+  restSec         Int     @default(60) @map("rest_sec")
+  /// Texto livre: cadência de execução (ex.: tempo em cada fase).
+  cadence         String? @db.Text
+  /// Blocos de prescrição: séries/reps/carga/descanso por fase (JSON array).
+  prescriptionBlocks Json? @map("prescription_blocks")
+  notes           String? @db.Text
+  painAdjustHint  String? @map("pain_adjust_hint") @db.Text
+  equipmentAlt    String? @map("equipment_alt") @db.Text
+
+  day      WorkoutDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  exercise Exercise   @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+}
+
+model WorkoutGroup {
+  id          String @id @default(cuid())
+  trainerId   String @map("trainer_id")
+  name        String
+  description String? @db.Text
+  templateId  String @map("template_id")
+
+  trainer  User              @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  template WorkoutTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  members  WorkoutGroupUser[]
+}
+
+model WorkoutGroupUser {
+  groupId   String   @map("group_id")
+  studentId String   @map("student_id")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  group   WorkoutGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student User         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, studentId])
+}
+
+/// Sobrescrita individual: plano base do grupo + template próprio da aluna
+model UserWorkoutOverride {
+  studentId  String @id @map("student_id")
+  templateId String @map("template_id")
+
+  student  StudentProfile  @relation(fields: [studentId], references: [userId], onDelete: Cascade)
+  template WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+}
+
+model WorkoutCompletion {
+  id          String    @id @default(cuid())
+  studentId   String    @map("student_id")
+  templateId  String?   @map("template_id")
+  dayIndex    Int?      @map("day_index")
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  dayFeeling  String?   @map("day_feeling")
+  notes       String?   @db.Text
+
+  student  User              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  template WorkoutTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  exerciseCompletions ExerciseCompletion[]
+}
+
+model ExerciseCompletion {
+  id                  String    @id @default(cuid())
+  workoutCompletionId String    @map("workout_completion_id")
+  exerciseId          String    @map("exercise_id")
+  orderIndex          Int       @map("order_index")
+  skipped             Boolean   @default(false)
+  substitutedId       String?   @map("substituted_exercise_id")
+  notes               String?   @db.Text
+  completedAt         DateTime? @map("completed_at")
+
+  workoutCompletion WorkoutCompletion @relation(fields: [workoutCompletionId], references: [id], onDelete: Cascade)
+  exercise          Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+}
+
+model NutritionTemplate {
+  id          String   @id @default(cuid())
+  authorId    String   @map("author_id")
+  title       String
+  objective   StudentGoal?
+  summary     String?  @db.Text
+  guidelines  String?  @db.Text
+  practicalTips String? @map("practical_tips") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  author User @relation("NutritionTemplateAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  meals     MealSuggestion[]
+  groups    NutritionGroup[]
+  overrides UserNutritionOverride[]
+}
+
+model MealSuggestion {
+  id          String @id @default(cuid())
+  templateId  String @map("template_id")
+  name        String
+  description String? @db.Text
+  substitutions String? @db.Text
+  orderIndex  Int    @map("order_index")
+
+  template NutritionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+}
+
+model NutritionGroup {
+  id          String @id @default(cuid())
+  nutritionistId String @map("nutritionist_id")
+  name        String
+  description String? @db.Text
+  templateId  String @map("template_id")
+
+  nutritionist User              @relation(fields: [nutritionistId], references: [id], onDelete: Cascade)
+  template     NutritionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  members      NutritionGroupUser[]
+}
+
+model NutritionGroupUser {
+  groupId   String   @map("group_id")
+  studentId String   @map("student_id")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  group   NutritionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, studentId])
+}
+
+model UserNutritionOverride {
+  studentId  String @id @map("student_id")
+  templateId String @map("template_id")
+
+  student  StudentProfile    @relation(fields: [studentId], references: [userId], onDelete: Cascade)
+  template NutritionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+}
+
+model NutritionGuideline {
+  id        String   @id @default(cuid())
+  title     String
+  body      String   @db.Text
+  objective StudentGoal?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+}
+
+model NutritionLog {
+  id        String   @id @default(cuid())
+  studentId String   @map("student_id")
+  action    String
+  meta      Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+model UserLevel {
+  userId           String @id @map("user_id")
+  currentLevel     Int    @default(1) @map("current_level")
+  consistencyWeeks Int    @default(0) @map("consistency_weeks")
+  progressPercent  Int    @default(0) @map("progress_percent")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LevelRule {
+  id              String @id @default(cuid())
+  level           Int    @unique
+  weeksRequired   Int    @map("weeks_required")
+  unlockSummary   String @db.Text @map("unlock_summary")
+  streakActivities Json  @map("streak_activities")
+}
+
+model ProgressHistory {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  event     String
+  payload   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WeeklyFrequencyLog {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  weekStart      DateTime @map("week_start")
+  completedCount Int      @map("completed_count")
+  targetCount    Int      @map("target_count")
+  metaGoalMet    Boolean  @default(false) @map("meta_goal_met")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weekStart])
+}
+
+model StreakState {
+  userId           String    @id @map("user_id")
+  currentStreak    Int       @default(0) @map("current_streak")
+  maxStreak        Int       @default(0) @map("max_streak")
+  lastActivityAt   DateTime? @map("last_activity_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StreakLog {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  type      String
+  value     Int?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DailyCheckin {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  date        DateTime @db.Date
+  disposition DispositionToday
+  note        String?  @db.Text
+  miniMissionDone Boolean @default(false) @map("mini_mission_done")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+model EngagementMessage {
+  id        String          @id @default(cuid())
+  tone      EngagementTone
+  template  String          @db.Text
+  active    Boolean         @default(true)
+  priority  Int             @default(0)
+  createdAt DateTime        @default(now()) @map("created_at")
+}
+
+model Achievement {
+  id          String @id @default(cuid())
+  code        String @unique
+  title       String
+  description String @db.Text
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  actorId   String?  @map("actor_id")
+  action    String
+  entity    String?
+  entityId  String?  @map("entity_id")
+  meta      Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  title     String
+  body      String    @db.Text
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AdminSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+}

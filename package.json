@@ -1,0 +1,30 @@
+{
+  "name": "lb-team",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:generate": "npm run generate --workspace=@lb-team/database",
+    "db:migrate": "npm run migrate --workspace=@lb-team/database",
+    "db:migrate:deploy": "npm run migrate:deploy --workspace=@lb-team/database",
+    "db:push": "npm run push --workspace=@lb-team/database",
+    "db:seed": "npm run seed --workspace=@lb-team/database",
+    "db:remove-demo-students": "npm run remove-demo-students --workspace=@lb-team/database",
+    "db:remove-all-students": "npm run remove-all-students --workspace=@lb-team/database",
+    "setup:local": "bash scripts/setup-local.sh",
+    "dev:api": "npm run start:dev --workspace=@lb-team/api",
+    "dev:web": "npm run dev --workspace=@lb-team/web",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

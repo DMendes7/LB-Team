@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply antialiased text-ink-900 bg-brand-50/30;
+}
+
+::selection {
+  @apply bg-brand-200 text-brand-900;
+}
