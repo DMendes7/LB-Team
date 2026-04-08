@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
+import { StreakFireIcon } from "@/components/icons/StreakFireIcon";
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
@@ -46,18 +47,34 @@ export function ProgressBar({ value, max = 100 }: { value: number; max?: number 
   );
 }
 
+/** Ícone de fogo do streak (brilho + animação); reutilizável fora do cartão do dashboard. */
+export function StreakFireVisual({
+  on,
+  iconClassName = "h-10 w-10",
+}: {
+  on: boolean;
+  iconClassName?: string;
+}) {
+  return (
+    <div
+      className={clsx(
+        "relative shrink-0 transition-all duration-300",
+        on
+          ? "drop-shadow-[0_0_14px_rgba(249,115,22,0.95)] drop-shadow-[0_0_28px_rgba(234,88,12,0.55)] drop-shadow-[0_0_42px_rgba(251,146,60,0.25)]"
+          : "grayscale contrast-110 opacity-85",
+      )}
+    >
+      <div className={clsx(on && "animate-streak-flame origin-bottom")}>
+        <StreakFireIcon active={on} className={iconClassName} />
+      </div>
+    </div>
+  );
+}
+
 export function StreakFire({ on, days }: { on: boolean; days: number }) {
   return (
-    <div className="flex items-center gap-2">
-      <span
-        className={clsx(
-          "text-3xl transition-all duration-300",
-          on ? "drop-shadow-[0_0_12px_rgba(249,115,22,0.8)] scale-100" : "grayscale opacity-40 scale-95",
-        )}
-        aria-hidden
-      >
-        {on ? "🔥" : "·"}
-      </span>
+    <div className="flex items-center gap-3">
+      <StreakFireVisual on={on} />
       <div>
         <p className="text-xs uppercase tracking-wider text-brand-700/80 font-medium">Sequência</p>
         <p className="font-display text-xl font-semibold text-ink-900">{days} dias</p>

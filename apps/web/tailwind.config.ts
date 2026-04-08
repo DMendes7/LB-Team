@@ -35,6 +35,7 @@ const config: Config = {
       animation: {
         "fade-in": "fadeIn 0.4s ease-out forwards",
         pulseSoft: "pulseSoft 2.2s ease-in-out infinite",
+        "streak-flame": "streakFlame 1.6s ease-in-out infinite",
       },
       keyframes: {
         fadeIn: {
@@ -44,6 +45,11 @@ const config: Config = {
         pulseSoft: {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.85" },
+        },
+        streakFlame: {
+          "0%, 100%": { transform: "scale(1)", opacity: "1" },
+          "35%": { transform: "scale(1.07)", opacity: "0.94" },
+          "70%": { transform: "scale(0.98)", opacity: "1" },
         },
       },
     },

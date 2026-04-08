@@ -335,14 +335,16 @@ model UserWorkoutOverride {
 }
 
 model WorkoutCompletion {
-  id          String    @id @default(cuid())
-  studentId   String    @map("student_id")
-  templateId  String?   @map("template_id")
-  dayIndex    Int?      @map("day_index")
-  startedAt   DateTime  @default(now()) @map("started_at")
-  completedAt DateTime? @map("completed_at")
-  dayFeeling  String?   @map("day_feeling")
-  notes       String?   @db.Text
+  id               String    @id @default(cuid())
+  studentId        String    @map("student_id")
+  templateId       String?   @map("template_id")
+  dayIndex         Int?      @map("day_index")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  /// Duração registrada ao finalizar (segundos), entre início e encerramento.
+  durationSeconds  Int?      @map("duration_seconds")
+  dayFeeling       String?   @map("day_feeling")
+  notes            String?   @db.Text
 
   student  User              @relation(fields: [studentId], references: [id], onDelete: Cascade)
   template WorkoutTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
@@ -359,6 +361,10 @@ model ExerciseCompletion {
   substitutedId       String?   @map("substituted_exercise_id")
   notes               String?   @db.Text
   completedAt         DateTime? @map("completed_at")
+  /// Carga registrada pela aluna neste exercício (kg), quando aplicável.
+  weightKg            Float?    @map("weight_kg")
+  /// Lista de cargas por série (kg), na ordem — ex. [10, 15, 20] para 3 séries.
+  weightsSeries       Json?     @map("weights_series")
 
   workoutCompletion WorkoutCompletion @relation(fields: [workoutCompletionId], references: [id], onDelete: Cascade)
   exercise          Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Cascade)

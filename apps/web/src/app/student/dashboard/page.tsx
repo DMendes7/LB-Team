@@ -10,7 +10,7 @@ type Dashboard = {
   greeting: string;
   weekly: { completed: number; target: number };
   level: { currentLevel: number; progressPercent: number; consistencyWeeks: number } | null;
-  streak: { currentStreak: number; maxStreak: number; fireOn: boolean; windowHours: number };
+  streak: { currentStreak: number; maxStreak: number; fireOn: boolean };
   engagement: { text: string; tone: string };
   hasWorkoutPlan: boolean;
   profile: { onboardingCompleted?: boolean } | null;
@@ -44,7 +44,8 @@ export default function StudentDashboardPage() {
         <Card>
           <StreakFire on={d.streak.fireOn} days={d.streak.currentStreak} />
           <p className="mt-3 text-xs text-ink-800/60">
-            Janela de {d.streak.windowHours}h para manter o fogo. Constância &gt; perfeição.
+            Só treinos concluídos contam (UTC). Check-in ou nutrição não mantêm o fogo. Se passar um dia inteiro sem
+            treino, a sequência zera. Constância &gt; perfeição.
           </p>
         </Card>
         <Card>

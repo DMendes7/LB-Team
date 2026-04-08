@@ -61,9 +61,6 @@ export class TrainerController {
     const streakLost: typeof links = [];
     const weeklyHit: typeof links = [];
 
-    const hours = await this.gamification.getStreakWindowHours();
-    const windowMs = hours * 60 * 60 * 1000;
-
     for (const l of links) {
       const s = l.student;
       const log = await this.prisma.weeklyFrequencyLog.findUnique({
@@ -73,9 +70,9 @@ export class TrainerController {
       const done = log?.completedCount ?? 0;
       if (done < target && done < Math.max(1, target - 1)) lowFrequency.push(l);
 
-      const last = s.streakState?.lastActivityAt?.getTime() ?? 0;
-      if (last && Date.now() - last > windowMs * 0.7 && Date.now() - last < windowMs) streakRisk.push(l);
-      if (last && Date.now() - last > windowMs) streakLost.push(l);
+      const pres = await this.gamification.resolveWorkoutStreakPresentation(s.id);
+      if (pres.atRisk) streakRisk.push(l);
+      if (pres.hadWorkout && !pres.fireOn && (pres.daysSinceLastWorkout ?? 0) >= 2) streakLost.push(l);
       if (log?.metaGoalMet) weeklyHit.push(l);
     }
 
@@ -139,6 +136,30 @@ export class TrainerController {
     });
   }
 
+  @Get("students/:studentId/workout-completions/:completionId")
+  async trainerWorkoutCompletionDetail(
+    @CurrentUser() u: JwtUser,
+    @Param("studentId") studentId: string,
+    @Param("completionId") completionId: string,
+  ) {
+    const sl = await this.prisma.trainerStudentLink.findUnique({
+      where: { trainerId_studentId: { trainerId: u.sub, studentId } },
+    });
+    if (!sl) throw new NotFoundException();
+    const c = await this.prisma.workoutCompletion.findFirst({
+      where: { id: completionId, studentId, completedAt: { not: null } },
+      include: {
+        template: true,
+        exerciseCompletions: {
+          orderBy: { orderIndex: "asc" },
+          include: { exercise: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!c) throw new NotFoundException();
+    return c;
+  }
+
   @Get("students/:id")
   async studentDetail(
     @CurrentUser() u: JwtUser,
@@ -170,20 +191,41 @@ export class TrainerController {
     const start = new Date(Date.UTC(y, m - 1, 1));
     const endExcl = new Date(Date.UTC(y, m, 1));
 
-    const completions = await this.prisma.workoutCompletion.findMany({
+    const monthCompletions = await this.prisma.workoutCompletion.findMany({
       where: {
         studentId: id,
         completedAt: { gte: start, lt: endExcl },
       },
-      select: { completedAt: true },
+      select: {
+        id: true,
+        completedAt: true,
+        durationSeconds: true,
+        template: { select: { name: true } },
+      },
+      orderBy: { completedAt: "desc" },
     });
     const trainedDates = [
       ...new Set(
-        completions
+        monthCompletions
           .map((c) => (c.completedAt ? c.completedAt.toISOString().slice(0, 10) : null))
           .filter(Boolean) as string[],
       ),
     ].sort();
+    const sessionsByDate: Record<
+      string,
+      { id: string; completedAt: string; durationSeconds: number | null; templateName: string }[]
+    > = {};
+    for (const c of monthCompletions) {
+      if (!c.completedAt) continue;
+      const key = c.completedAt.toISOString().slice(0, 10);
+      if (!sessionsByDate[key]) sessionsByDate[key] = [];
+      sessionsByDate[key].push({
+        id: c.id,
+        completedAt: c.completedAt.toISOString(),
+        durationSeconds: c.durationSeconds,
+        templateName: c.template?.name ?? "Treino",
+      });
+    }
 
     const slots = await this.prisma.studentWorkoutSlot.findMany({
       where: { studentId: id, trainerId: u.sub },
@@ -271,10 +313,21 @@ export class TrainerController {
       workoutAssignment = { kind: "none", template: null, groupName: null };
     }
 
+    const streakPres = await this.gamification.resolveWorkoutStreakPresentation(id);
+
     return {
       ...link,
+      student: {
+        ...link.student,
+        streakState: {
+          currentStreak: streakPres.currentStreak,
+          maxStreak: link.student.streakState?.maxStreak ?? 0,
+          lastActivityAt: link.student.streakState?.lastActivityAt ?? null,
+          fireOn: streakPres.fireOn,
+        },
+      },
       insights: {
-        trainingMonth: { year: y, month: m, trainedDates },
+        trainingMonth: { year: y, month: m, trainedDates, sessionsByDate },
         slots: slots.map((s) => ({
           id: s.id,
           label: s.label,

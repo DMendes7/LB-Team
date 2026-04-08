@@ -20,58 +20,144 @@ export class GamificationService {
     return TARGET_MAP[target];
   }
 
-  async getStreakWindowHours(): Promise<number> {
-    const row = await this.prisma.adminSetting.findUnique({ where: { key: "streak_window_hours" } });
-    const v = row?.value;
-    return typeof v === "number" ? v : 24;
+  /** Dias civis completos (UTC) entre a data de `last` e a de `now` (0 = mesmo dia UTC). */
+  utcCalendarDaysApart(last: Date, now: Date): number {
+    const t0 = Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate());
+    const t1 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Math.floor((t1 - t0) / 86400000);
   }
 
-  /** Registra atividade válida para streak e histórico. */
-  async recordStreakActivity(userId: string, activityType: string) {
-    const hours = await this.getStreakWindowHours();
-    const now = new Date();
-    const state = await this.prisma.streakState.findUnique({ where: { userId } });
-    const windowMs = hours * 60 * 60 * 1000;
+  utcDayKey(d: Date): string {
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth() + 1;
+    const day = d.getUTCDate();
+    return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
 
+  private utcNoonFromDayKey(key: string): Date {
+    const [ys, ms, ds] = key.split("-").map(Number);
+    return new Date(Date.UTC(ys, ms - 1, ds, 12, 0, 0));
+  }
+
+  /**
+   * Streak só conta treinos concluídos (histórico real). Check-in, nutrição, etc. não mantêm o fogo aceso.
+   * Dias civis UTC; ≥2 dias sem treino desde o último → 0 e fogo apagado.
+   */
+  async resolveWorkoutStreakPresentation(
+    userId: string,
+    now = new Date(),
+  ): Promise<{
+    currentStreak: number;
+    fireOn: boolean;
+    atRisk: boolean;
+    hadWorkout: boolean;
+    daysSinceLastWorkout: number | null;
+  }> {
+    const rows = await this.prisma.workoutCompletion.findMany({
+      where: { studentId: userId, completedAt: { not: null } },
+      select: { completedAt: true },
+      orderBy: { completedAt: "desc" },
+      take: 800,
+    });
+    const dayKeys = new Set<string>();
+    for (const r of rows) {
+      dayKeys.add(this.utcDayKey(r.completedAt!));
+    }
+    if (dayKeys.size === 0) {
+      return {
+        currentStreak: 0,
+        fireOn: false,
+        atRisk: false,
+        hadWorkout: false,
+        daysSinceLastWorkout: null,
+      };
+    }
+    const sorted = [...dayKeys].sort((a, b) => b.localeCompare(a));
+    const lastKey = sorted[0]!;
+    const lastWorkoutNoon = this.utcNoonFromDayKey(lastKey);
+    const daysSinceLast = this.utcCalendarDaysApart(lastWorkoutNoon, now);
+    if (daysSinceLast >= 2) {
+      return {
+        currentStreak: 0,
+        fireOn: false,
+        atRisk: false,
+        hadWorkout: true,
+        daysSinceLastWorkout: daysSinceLast,
+      };
+    }
+    let count = 0;
+    const d = new Date(lastWorkoutNoon);
+    while (true) {
+      const k = this.utcDayKey(d);
+      if (!dayKeys.has(k)) break;
+      count++;
+      d.setUTCDate(d.getUTCDate() - 1);
+    }
+    const alive = count > 0;
+    return {
+      currentStreak: count,
+      fireOn: alive,
+      atRisk: alive && daysSinceLast === 1,
+      hadWorkout: true,
+      daysSinceLastWorkout: daysSinceLast,
+    };
+  }
+
+  /**
+   * Só treino concluído altera sequência e `StreakState`. Outras ações só entram no histórico de progresso
+   * (para não “enganar” o fogo com check-in ou abrir nutrição).
+   */
+  async recordStreakActivity(userId: string, activityType: string) {
+    await this.prisma.progressHistory.create({
+      data: { userId, event: "STREAK_ACTIVITY", payload: { activityType } as object },
+    });
+
+    if (activityType !== "WORKOUT_COMPLETE") {
+      return;
+    }
+
+    const recent = await this.prisma.workoutCompletion.findMany({
+      where: { studentId: userId, completedAt: { not: null } },
+      orderBy: { completedAt: "desc" },
+      take: 2,
+      select: { completedAt: true },
+    });
+    const newest = recent[0]?.completedAt;
+    if (!newest) return;
+
+    const state = await this.prisma.streakState.findUnique({ where: { userId } });
     let current = state?.currentStreak ?? 0;
     let max = state?.maxStreak ?? 0;
-    const last = state?.lastActivityAt;
+    const prev = recent[1]?.completedAt ?? null;
 
-    const sameUtcDay = (a: Date, b: Date) =>
-      a.getUTCFullYear() === b.getUTCFullYear() &&
-      a.getUTCMonth() === b.getUTCMonth() &&
-      a.getUTCDate() === b.getUTCDate();
-
-    if (last) {
-      const delta = now.getTime() - last.getTime();
-      if (delta > windowMs) {
+    if (!prev) {
+      current = 1;
+    } else {
+      const daysApart = this.utcCalendarDaysApart(prev, newest);
+      if (daysApart === 0) {
+        /* segundo+ treino no mesmo dia UTC — mantém contagem */
+      } else if (daysApart === 1) {
+        current += 1;
+      } else {
         if (current > 0) {
           await this.prisma.streakLog.create({
             data: { userId, type: "STREAK_LOST", value: current },
           });
         }
         current = 1;
-      } else if (!sameUtcDay(last, now)) {
-        current += 1;
       }
-    } else {
-      current = 1;
     }
 
     max = Math.max(max, current);
 
     await this.prisma.streakState.upsert({
       where: { userId },
-      create: { userId, currentStreak: current, maxStreak: max, lastActivityAt: now },
-      update: { currentStreak: current, maxStreak: max, lastActivityAt: now },
+      create: { userId, currentStreak: current, maxStreak: max, lastActivityAt: newest },
+      update: { currentStreak: current, maxStreak: max, lastActivityAt: newest },
     });
 
     await this.prisma.streakLog.create({
       data: { userId, type: "ACTIVITY", value: 1 },
-    });
-
-    await this.prisma.progressHistory.create({
-      data: { userId, event: "STREAK_ACTIVITY", payload: { activityType } as object },
     });
   }
 
@@ -146,11 +232,8 @@ export class GamificationService {
   }
 
   async resolveEngagementMessage(userId: string): Promise<{ tone: EngagementTone; text: string }> {
-    const state = await this.prisma.streakState.findUnique({ where: { userId } });
-    const hours = await this.getStreakWindowHours();
-    const now = Date.now();
-    const last = state?.lastActivityAt?.getTime() ?? 0;
-    const atRisk = last && now - last > (hours * 60 * 60 * 1000) * 0.7 && now - last < hours * 60 * 60 * 1000;
+    const pres = await this.resolveWorkoutStreakPresentation(userId);
+    const atRisk = pres.atRisk;
 
     const weekStart = startOfWeekUtc(new Date());
     const weekLog = await this.prisma.weeklyFrequencyLog.findUnique({

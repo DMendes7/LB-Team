@@ -4,6 +4,8 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  NotFoundException,
+  Param,
   Post,
   Query,
   UseGuards,
@@ -18,6 +20,43 @@ import { WorkoutResolveService } from "../workouts/workout-resolve.service";
 import { GamificationService } from "../gamification/gamification.service";
 import { StudentLinksService } from "../student-links/student-links.service";
 import { startOfWeekUtc } from "../common/week";
+
+function parseMonthKey(month?: string): { y: number; m: number } {
+  const now = new Date();
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return { y: now.getUTCFullYear(), m: now.getUTCMonth() + 1 };
+  }
+  const [ys, ms] = month.split("-");
+  return { y: Number(ys), m: Number(ms) };
+}
+
+function coerceWeightsSeriesFromBody(v: unknown): number[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: number[] = [];
+  for (const x of v) {
+    if (typeof x === "number" && Number.isFinite(x)) out.push(x);
+    else if (typeof x === "string" && x.trim() !== "") {
+      const n = parseFloat(x.replace(",", ".").trim());
+      if (Number.isFinite(n)) out.push(n);
+    }
+  }
+  return out.length ? out : undefined;
+}
+
+/** Cargas podem ir sem exercício “concluído”; `weightKg` guarda o 1.º valor para compatibilidade. */
+function exerciseWeightsFields(e: { weightKg?: number | null; weightsSeries?: unknown }) {
+  const series = coerceWeightsSeriesFromBody(e.weightsSeries);
+  const legacy =
+    e.weightKg != null && typeof e.weightKg === "number" && !Number.isNaN(e.weightKg)
+      ? e.weightKg
+      : null;
+  const hasSeries = series && series.length > 0;
+  const first = hasSeries ? series![0]! : legacy;
+  return {
+    weightKg: first != null ? first : undefined,
+    weightsSeries: hasSeries ? series : undefined,
+  };
+}
 
 @Controller("student")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -50,9 +89,7 @@ export class StudentController {
     const target = this.gamification.weeklyTargetCount(profile?.weeklyTarget);
     const completedThisWeek = weekLog?.completedCount ?? 0;
 
-    const hours = await this.gamification.getStreakWindowHours();
-    const last = streak?.lastActivityAt?.getTime() ?? 0;
-    const streakAlive = last && Date.now() - last < hours * 60 * 60 * 1000;
+    const streakView = await this.gamification.resolveWorkoutStreakPresentation(u.sub);
 
     return {
       greeting: profile?.onboardingCompleted ? "Olá, vamos com calma e constância hoje." : "Complete seu onboarding para liberar o plano.",
@@ -60,8 +97,9 @@ export class StudentController {
       level,
       streak: {
         ...streak,
-        fireOn: !!streakAlive,
-        windowHours: hours,
+        currentStreak: streakView.currentStreak,
+        fireOn: streakView.fireOn,
+        maxStreak: streak?.maxStreak ?? 0,
       },
       weekly: { completed: completedThisWeek, target },
       engagement: msg,
@@ -90,6 +128,114 @@ export class StudentController {
       day: day ? { ...day, dayIndex: day.dayIndex } : null,
       adaptationHint: "Se estiver cansada, reduza uma série ou use substituições sugeridas.",
     };
+  }
+
+  /** Inicia sessão com `completedAt` nulo; duração e exercícios vão em `finish`. */
+  @Post("workout-session/start")
+  async startWorkoutSession(
+    @CurrentUser() u: JwtUser,
+    @Body() body: { templateId: string; dayIndex?: number },
+  ) {
+    if (!body.templateId?.trim()) throw new BadRequestException("templateId é obrigatório.");
+    const allowed = await this.resolve.studentCanUseTemplate(u.sub, body.templateId);
+    if (!allowed) throw new ForbiddenException("Este treino não faz parte do seu plano.");
+    return this.prisma.workoutCompletion.create({
+      data: {
+        studentId: u.sub,
+        templateId: body.templateId,
+        dayIndex: body.dayIndex,
+        completedAt: null,
+      },
+      select: { id: true, startedAt: true, templateId: true, dayIndex: true },
+    });
+  }
+
+  @Post("workout-session/:completionId/finish")
+  async finishWorkoutSession(
+    @CurrentUser() u: JwtUser,
+    @Param("completionId") completionId: string,
+    @Body()
+    body: {
+      dayFeeling?: string;
+      notes?: string;
+      disposition?: DispositionToday;
+      exercises: {
+        exerciseId: string;
+        orderIndex: number;
+        skipped: boolean;
+        done?: boolean;
+        weightKg?: number | null;
+        weightsSeries?: number[] | null;
+      }[];
+    },
+  ) {
+    const row = await this.prisma.workoutCompletion.findFirst({
+      where: { id: completionId, studentId: u.sub },
+    });
+    if (!row) throw new NotFoundException("Sessão não encontrada.");
+    if (row.completedAt) throw new BadRequestException("Este treino já foi encerrado.");
+
+    const now = new Date();
+    const durationSeconds = Math.max(0, Math.floor((now.getTime() - row.startedAt.getTime()) / 1000));
+
+    const exercises = body.exercises ?? [];
+    const completion = await this.prisma.workoutCompletion.update({
+      where: { id: completionId },
+      data: {
+        completedAt: now,
+        durationSeconds,
+        dayFeeling: body.dayFeeling,
+        notes: body.notes,
+        exerciseCompletions: {
+          create: exercises.map((e) => {
+            const skipped = e.skipped === true;
+            const done = e.done === true && !skipped;
+            const wf = exerciseWeightsFields(e);
+            return {
+              exerciseId: e.exerciseId,
+              orderIndex: e.orderIndex,
+              skipped,
+              weightKg: wf.weightKg,
+              weightsSeries: wf.weightsSeries,
+              completedAt: done ? now : null,
+            };
+          }),
+        },
+      },
+      include: {
+        exerciseCompletions: { include: { exercise: { select: { id: true, name: true } } } },
+        template: true,
+      },
+    });
+
+    await this.gamification.afterWorkoutCompleted(u.sub);
+
+    if (body.disposition !== undefined && body.disposition !== null) {
+      if (!Object.values(DispositionToday).includes(body.disposition)) {
+        throw new BadRequestException("disposition inválida.");
+      }
+      const date = new Date();
+      date.setUTCHours(0, 0, 0, 0);
+      const note =
+        body.notes !== undefined && body.notes !== null ? (body.notes.trim() || null) : undefined;
+      await this.prisma.dailyCheckin.upsert({
+        where: { userId_date: { userId: u.sub, date } },
+        create: {
+          userId: u.sub,
+          date,
+          disposition: body.disposition,
+          note: note ?? null,
+          miniMissionDone: true,
+        },
+        update: {
+          disposition: body.disposition,
+          miniMissionDone: true,
+          ...(note !== undefined ? { note } : {}),
+        },
+      });
+    }
+
+    return completion;
   }
 
   @Get("workout-today")
@@ -127,7 +273,15 @@ export class StudentController {
       notes?: string;
       /** Check-in “como estava hoje”, gravado no mesmo dia sem nova pontuação de streak. */
       disposition?: DispositionToday;
-      exercises: { exerciseId: string; orderIndex: number; skipped?: boolean; substitutedId?: string | null; notes?: string }[];
+      exercises: {
+        exerciseId: string;
+        orderIndex: number;
+        skipped?: boolean;
+        substitutedId?: string | null;
+        notes?: string;
+        weightKg?: number | null;
+        weightsSeries?: number[] | null;
+      }[];
     },
   ) {
     let templateId = body.templateId ?? (await this.resolve.getEffectiveTemplateId(u.sub));
@@ -141,17 +295,23 @@ export class StudentController {
         templateId,
         dayIndex: body.dayIndex,
         completedAt: new Date(),
+        durationSeconds: 0,
         dayFeeling: body.dayFeeling,
         notes: body.notes,
         exerciseCompletions: {
-          create: body.exercises.map((e) => ({
-            exerciseId: e.exerciseId,
-            orderIndex: e.orderIndex,
-            skipped: e.skipped ?? false,
-            substitutedId: e.substitutedId ?? undefined,
-            notes: e.notes,
-            completedAt: e.skipped ? null : new Date(),
-          })),
+          create: body.exercises.map((e) => {
+            const wf = exerciseWeightsFields(e);
+            return {
+              exerciseId: e.exerciseId,
+              orderIndex: e.orderIndex,
+              skipped: e.skipped ?? false,
+              substitutedId: e.substitutedId ?? undefined,
+              notes: e.notes,
+              weightKg: wf.weightKg,
+              weightsSeries: wf.weightsSeries,
+              completedAt: e.skipped ? null : new Date(),
+            };
+          }),
         },
       },
       include: { exerciseCompletions: true },
@@ -238,11 +398,53 @@ export class StudentController {
     return { ok: true };
   }
 
+  @Get("history/workouts/:completionId")
+  async workoutHistoryDetail(@CurrentUser() u: JwtUser, @Param("completionId") completionId: string) {
+    const c = await this.prisma.workoutCompletion.findFirst({
+      where: { id: completionId, studentId: u.sub, completedAt: { not: null } },
+      include: {
+        template: true,
+        exerciseCompletions: {
+          orderBy: { orderIndex: "asc" },
+          include: { exercise: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!c) throw new NotFoundException();
+    return c;
+  }
+
+  @Get("workout-calendar")
+  async workoutCalendar(@CurrentUser() u: JwtUser, @Query("month") month?: string) {
+    const { y, m } = parseMonthKey(month);
+    const start = new Date(Date.UTC(y, m - 1, 1));
+    const endExcl = new Date(Date.UTC(y, m, 1));
+    const sessions = await this.prisma.workoutCompletion.findMany({
+      where: {
+        studentId: u.sub,
+        completedAt: { gte: start, lt: endExcl },
+      },
+      orderBy: { completedAt: "desc" },
+      include: { template: { select: { id: true, name: true } } },
+    });
+    return {
+      year: y,
+      month: m,
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        completedAt: s.completedAt!.toISOString(),
+        durationSeconds: s.durationSeconds,
+        templateName: s.template?.name ?? "Treino",
+        templateId: s.templateId,
+      })),
+    };
+  }
+
   @Get("history/workouts")
   history(@CurrentUser() u: JwtUser) {
     return this.prisma.workoutCompletion.findMany({
-      where: { studentId: u.sub },
-      orderBy: { startedAt: "desc" },
+      where: { studentId: u.sub, completedAt: { not: null } },
+      orderBy: { completedAt: "desc" },
       take: 30,
       include: { template: true },
     });

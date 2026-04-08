@@ -5,8 +5,11 @@ import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { api } from "@/lib/api";
+import { formatWeightsRecorded } from "@/lib/workout-weights";
 import { AppShell } from "@/components/AppShell";
+import { StreakFireIcon } from "@/components/icons/StreakFireIcon";
 import { Button, Card } from "@/components/ui";
+import clsx from "clsx";
 
 type StudentUser = {
   id: string;
@@ -20,7 +23,12 @@ type StudentUser = {
     weeklyTarget: string | null;
   } | null;
   userLevel: { currentLevel: number; consistencyWeeks: number } | null;
-  streakState: { currentStreak: number; maxStreak: number; lastActivityAt: string | null } | null;
+  streakState: {
+    currentStreak: number;
+    maxStreak: number;
+    lastActivityAt: string | null;
+    fireOn: boolean;
+  };
 };
 
 type SlotRow = {
@@ -31,10 +39,40 @@ type SlotRow = {
   template: { id: string; name: string; description: string | null; privateForStudentId?: string | null };
 };
 
+type SessionSummary = {
+  id: string;
+  completedAt: string;
+  durationSeconds: number | null;
+  templateName: string;
+};
+
+type CompletionDetail = {
+  id: string;
+  completedAt: string | null;
+  startedAt: string;
+  durationSeconds: number | null;
+  dayFeeling: string | null;
+  notes: string | null;
+  template: { name: string } | null;
+  exerciseCompletions: {
+    orderIndex: number;
+    skipped: boolean;
+    completedAt: string | null;
+    weightKg: number | null;
+    weightsSeries?: unknown;
+    exercise: { id: string; name: string };
+  }[];
+};
+
 type DetailRes = {
   student: StudentUser;
   insights: {
-    trainingMonth: { year: number; month: number; trainedDates: string[] };
+    trainingMonth: {
+      year: number;
+      month: number;
+      trainedDates: string[];
+      sessionsByDate: Record<string, SessionSummary[]>;
+    };
     slots: SlotRow[];
     workoutGroups: { groupId: string; name: string; templateName: string }[];
     workoutAssignment:
@@ -82,6 +120,16 @@ function levelPt(l: string | null) {
   return map[l] ?? l;
 }
 
+function formatSessionDur(s: number | null) {
+  if (s == null) return "—";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}min`;
+  if (m > 0) return `${m} min ${sec}s`;
+  return `${sec}s`;
+}
+
 function TrainerStudentDetailPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -104,6 +152,9 @@ function TrainerStudentDetailPageInner() {
   const [slotSaving, setSlotSaving] = useState(false);
   const [libraryModalError, setLibraryModalError] = useState("");
   const [customModalError, setCustomModalError] = useState("");
+  const [workoutDayModal, setWorkoutDayModal] = useState<string | null>(null);
+  const [workoutDetail, setWorkoutDetail] = useState<CompletionDetail | null>(null);
+  const [workoutDetailLoading, setWorkoutDetailLoading] = useState(false);
 
   const load = useCallback(() => {
     if (!id) return;
@@ -137,8 +188,14 @@ function TrainerStudentDetailPageInner() {
   }, [libraryModalOpen, templates]);
 
   const calendar = useMemo(() => {
-    if (!data) return { cells: [] as { key: string; inMonth: boolean; trained: boolean; isToday: boolean }[], label: "" };
-    const { year, month: m, trainedDates } = data.insights.trainingMonth;
+    if (!data) {
+      return {
+        cells: [] as { key: string; inMonth: boolean; trained: boolean; isToday: boolean }[],
+        label: "",
+        sessionsByDate: {} as Record<string, SessionSummary[]>,
+      };
+    }
+    const { year, month: m, trainedDates, sessionsByDate } = data.insights.trainingMonth;
     const first = new Date(Date.UTC(year, m - 1, 1));
     const last = new Date(Date.UTC(year, m, 0));
     const startPad = first.getUTCDay();
@@ -155,13 +212,29 @@ function TrainerStudentDetailPageInner() {
       cells.push({ key, inMonth: true, trained: set.has(key), isToday: key === todayKey });
     }
     const label = new Date(Date.UTC(year, m - 1, 1)).toLocaleString("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" });
-    return { cells, label };
+    return { cells, label, sessionsByDate };
   }, [data]);
 
   function shiftMonth(delta: number) {
     const [y, m] = month.split("-").map(Number);
     const d = new Date(Date.UTC(y, m - 1 + delta, 1));
     setMonth(monthKey(d));
+  }
+
+  async function openTrainerWorkoutDetail(completionId: string) {
+    if (!id) return;
+    setWorkoutDetailLoading(true);
+    setWorkoutDetail(null);
+    try {
+      const d = await api<CompletionDetail>(
+        `/trainer/students/${id}/workout-completions/${completionId}`,
+      );
+      setWorkoutDetail(d);
+    } catch {
+      setWorkoutDetail(null);
+    } finally {
+      setWorkoutDetailLoading(false);
+    }
   }
 
   async function addToGroup() {
@@ -338,12 +411,26 @@ function TrainerStudentDetailPageInner() {
                 <dt className="text-ink-800/60">Nível gamificado</dt>
                 <dd>{s.userLevel ? `Nv. ${s.userLevel.currentLevel} · ${s.userLevel.consistencyWeeks} sem. consistentes` : "—"}</dd>
               </div>
-              <div>
-                <dt className="text-ink-800/60">Streak</dt>
-                <dd>
-                  {s.streakState
-                    ? `${s.streakState.currentStreak} dias (máx. ${s.streakState.maxStreak})`
-                    : "—"}
+              <div className="sm:col-span-2">
+                <dt className="text-ink-800/60">Sequência de treinos</dt>
+                <dd className="flex items-center gap-2 text-ink-900">
+                  <span
+                    className={clsx(
+                      "inline-flex shrink-0",
+                      s.streakState.fireOn ? "opacity-90" : "grayscale opacity-55",
+                    )}
+                    aria-hidden
+                  >
+                    <StreakFireIcon active={s.streakState.fireOn} className="h-5 w-5" />
+                  </span>
+                  <span>
+                    {s.streakState.currentStreak}{" "}
+                    {s.streakState.currentStreak === 1 ? "dia" : "dias"} · máx. {s.streakState.maxStreak}
+                    <span className="text-ink-800/50">
+                      {" "}
+                      ({s.streakState.fireOn ? "ativa" : "inativa"} · UTC)
+                    </span>
+                  </span>
                 </dd>
               </div>
             </dl>
@@ -565,10 +652,17 @@ function TrainerStudentDetailPageInner() {
               ))}
               {calendar.cells.map((c) =>
                 c.inMonth ? (
-                  <div
+                  <button
                     key={c.key}
+                    type="button"
+                    disabled={!c.trained}
+                    onClick={() => {
+                      if (c.trained) setWorkoutDayModal(c.key);
+                    }}
                     className={`rounded-lg py-2 ${
-                      c.trained ? "bg-brand-500 text-white font-semibold" : "bg-brand-50/80 text-ink-800"
+                      c.trained
+                        ? "cursor-pointer bg-brand-500 font-semibold text-white hover:bg-brand-600"
+                        : "cursor-default bg-brand-50/80 text-ink-800"
                     } ${
                       c.isToday
                         ? c.trained
@@ -578,7 +672,7 @@ function TrainerStudentDetailPageInner() {
                     }`}
                   >
                     {Number(c.key.slice(-2))}
-                  </div>
+                  </button>
                 ) : (
                   <div key={c.key} className="py-2 text-transparent">
                     ·
@@ -587,7 +681,7 @@ function TrainerStudentDetailPageInner() {
               )}
             </div>
             <p className="mt-2 text-xs text-ink-800/60">
-              Dias em destaque: treino concluído naquele dia (UTC). Contorno no dia de hoje (UTC).
+              Toque num dia em destaque para ver o registro (exercícios, pesos, duração). UTC. Contorno = hoje (UTC).
             </p>
           </Card>
         </div>
@@ -707,6 +801,101 @@ function TrainerStudentDetailPageInner() {
                 {slotSaving ? "Criando…" : "Criar e abrir editor"}
               </Button>
             </div>
+          </Card>
+        </div>
+      )}
+
+      {workoutDayModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink-900/40 p-3 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => e.target === e.currentTarget && setWorkoutDayModal(null)}
+        >
+          <Card className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl p-4 shadow-xl">
+            <p className="font-display font-bold text-ink-900">Treinos em {workoutDayModal}</p>
+            <ul className="mt-3 space-y-2">
+              {(calendar.sessionsByDate[workoutDayModal] ?? []).map((s) => (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    className="w-full rounded-xl border border-brand-100 bg-brand-50/50 px-3 py-3 text-left hover:bg-brand-50"
+                    onClick={() => {
+                      setWorkoutDayModal(null);
+                      void openTrainerWorkoutDetail(s.id);
+                    }}
+                  >
+                    <p className="font-medium text-ink-900">{s.templateName}</p>
+                    <p className="text-xs text-ink-800/65">
+                      {new Date(s.completedAt).toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}{" "}
+                      · {formatSessionDur(s.durationSeconds)}
+                    </p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <Button type="button" variant="ghost" className="mt-4 w-full" onClick={() => setWorkoutDayModal(null)}>
+              Fechar
+            </Button>
+          </Card>
+        </div>
+      )}
+
+      {(workoutDetail || workoutDetailLoading) && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-ink-900/40 p-3 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => e.target === e.currentTarget && setWorkoutDetail(null)}
+        >
+          <Card className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl p-4 shadow-xl">
+            {workoutDetailLoading && <p className="text-sm text-ink-800/70">Carregando…</p>}
+            {workoutDetail && !workoutDetailLoading && (
+              <>
+                <p className="font-display font-bold text-ink-900">{workoutDetail.template?.name ?? "Treino"}</p>
+                <p className="mt-1 text-xs text-ink-800/65">
+                  {workoutDetail.completedAt
+                    ? new Date(workoutDetail.completedAt).toLocaleString("pt-BR")
+                    : "—"}
+                </p>
+                <p className="mt-2 text-sm text-ink-800">
+                  <strong>Duração:</strong> {formatSessionDur(workoutDetail.durationSeconds)}
+                </p>
+                {workoutDetail.dayFeeling && (
+                  <p className="mt-1 text-sm text-ink-800">
+                    <strong>Esforço (relato):</strong> {workoutDetail.dayFeeling}
+                  </p>
+                )}
+                {workoutDetail.notes && (
+                  <p className="mt-2 rounded-lg bg-brand-50/80 p-2 text-sm text-ink-800">
+                    <strong>Nota da aluna:</strong> {workoutDetail.notes}
+                  </p>
+                )}
+                <p className="mt-4 text-xs font-semibold uppercase text-brand-800">Exercícios</p>
+                <ul className="mt-2 space-y-2">
+                  {workoutDetail.exerciseCompletions.map((e) => {
+                    const wtxt = formatWeightsRecorded(e.weightsSeries, e.weightKg);
+                    return (
+                      <li key={e.orderIndex} className="rounded-lg border border-brand-100 px-3 py-2 text-sm">
+                        <span className="font-medium text-ink-900">{e.exercise.name}</span>
+                        <span className="mt-1 block text-xs text-ink-800/75">
+                          {e.skipped ? "Pulado" : e.completedAt ? "Feito" : "Não concluído"}
+                          {wtxt ? (
+                            <span className="mt-0.5 block text-ink-800/90">Cargas: {wtxt}</span>
+                          ) : null}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <Button type="button" variant="ghost" className="mt-4 w-full" onClick={() => setWorkoutDetail(null)}>
+                  Fechar
+                </Button>
+              </>
+            )}
           </Card>
         </div>
       )}
