@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui";
 
@@ -10,7 +11,9 @@ export default function TrainerStudentsPage() {
   const [rows, setRows] = useState<{ student: { id: string; name: string; email: string } }[]>([]);
 
   useEffect(() => {
-    api("/trainer/students").then(setRows);
+    api("/trainer/students")
+      .then(setRows)
+      .catch((e) => notify.apiError(e));
   }, []);
 
   return (

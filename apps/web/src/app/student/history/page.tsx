@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { formatWeightsRecorded } from "@/lib/workout-weights";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
@@ -63,10 +64,14 @@ export default function HistoryPage() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(() => {
-    api<CalendarRes>(`/student/workout-calendar?month=${month}`).then(setCal);
+    api<CalendarRes>(`/student/workout-calendar?month=${month}`)
+      .then(setCal)
+      .catch((e) => notify.apiError(e));
     api<
       { id: string; completedAt: string | null; durationSeconds: number | null; template: { name: string } | null }[]
-    >("/student/history/workouts").then(setRecent);
+    >("/student/history/workouts")
+      .then(setRecent)
+      .catch((e) => notify.apiError(e));
   }, [month]);
 
   useEffect(() => {
@@ -111,7 +116,8 @@ export default function HistoryPage() {
     try {
       const d = await api<CompletionDetail>(`/student/history/workouts/${id}`);
       setDetail(d);
-    } catch {
+    } catch (e) {
+      notify.apiError(e);
       setDetail(null);
     } finally {
       setDetailLoading(false);

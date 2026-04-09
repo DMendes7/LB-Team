@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, setToken } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { Button, Card } from "@/components/ui";
 
 export default function RegisterPage() {
@@ -14,13 +15,10 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
-  const [err, setErr] = useState("");
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErr("");
     if (!acceptTerms) {
-      setErr("Aceite os termos para continuar.");
+      notify.warning("Aceite os termos para continuar.");
       return;
     }
     try {
@@ -36,9 +34,10 @@ export default function RegisterPage() {
         }),
       });
       setToken(res.accessToken);
+      notify.success("Conta criada. Complete seu perfil.");
       router.push("/onboarding");
-    } catch {
-      setErr("Não foi possível cadastrar. Talvez o e-mail já exista.");
+    } catch (e) {
+      notify.apiError(e);
     }
   }
 
@@ -99,7 +98,6 @@ export default function RegisterPage() {
             <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
             Li e aceito os termos de uso e política de privacidade.
           </label>
-          {err && <p className="text-sm text-red-600">{err}</p>}
           <Button type="submit" className="w-full">
             Continuar
           </Button>

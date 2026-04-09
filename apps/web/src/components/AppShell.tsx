@@ -15,6 +15,7 @@ const nav: Record<Role, { href: string; label: string }[]> = {
     { href: "/student/workout", label: "Treino" },
     { href: "/student/nutrition", label: "Nutrição" },
     { href: "/student/progress", label: "Progresso" },
+    { href: "/student/events", label: "Eventos" },
     { href: "/student/history", label: "Histórico" },
     { href: "/student/messages", label: "Apoio" },
     { href: "/student/profile", label: "Perfil" },
@@ -25,6 +26,7 @@ const nav: Record<Role, { href: string; label: string }[]> = {
     { href: "/trainer/exercises", label: "Exercícios" },
     { href: "/trainer/workouts", label: "Treinos" },
     { href: "/trainer/groups", label: "Grupos" },
+    { href: "/trainer/events", label: "Eventos" },
     { href: "/trainer/reports", label: "Relatórios" },
   ],
   NUTRITIONIST: [

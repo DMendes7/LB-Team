@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button, Card } from "@/components/ui";
@@ -85,8 +86,6 @@ export default function TrainerGroupsPage() {
   const [rows, setRows] = useState<GroupRow[]>([]);
   const [templates, setTemplates] = useState<TemplateOpt[]>([]);
   const [students, setStudents] = useState<StudentLink[]>([]);
-  const [msg, setMsg] = useState<string | null>(null);
-
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
@@ -109,15 +108,25 @@ export default function TrainerGroupsPage() {
   const [deleteGroupOpen, setDeleteGroupOpen] = useState(false);
 
   const load = useCallback(() => {
-    api<GroupRow[]>("/trainer/workout-groups").then(setRows).catch(() => setRows([]));
+    api<GroupRow[]>("/trainer/workout-groups")
+      .then(setRows)
+      .catch((e) => {
+        notify.apiError(e);
+        setRows([]);
+      });
   }, []);
 
   useEffect(() => {
     load();
-    api<TemplateOpt[]>("/trainer/workout-templates").then((t) =>
-      setTemplates(t.map((x) => ({ id: x.id, name: x.name }))),
-    );
-    api<StudentLink[]>("/trainer/students").then(setStudents).catch(() => setStudents([]));
+    api<TemplateOpt[]>("/trainer/workout-templates")
+      .then((t) => setTemplates(t.map((x) => ({ id: x.id, name: x.name }))))
+      .catch((e) => notify.apiError(e));
+    api<StudentLink[]>("/trainer/students")
+      .then(setStudents)
+      .catch((e) => {
+        notify.apiError(e);
+        setStudents([]);
+      });
   }, [load]);
 
   useEffect(() => {
@@ -132,7 +141,8 @@ export default function TrainerGroupsPage() {
       setEditName(d.name);
       setEditDescription(d.description ?? "");
       setEditTemplateId(d.templateId);
-    } catch {
+    } catch (e) {
+      notify.apiError(e);
       setDetailFeedback({ kind: "err", text: "Não foi possível recarregar o grupo." });
     }
   }, []);
@@ -151,7 +161,8 @@ export default function TrainerGroupsPage() {
           setEditDescription(d.description ?? "");
           setEditTemplateId(d.templateId);
         })
-        .catch(() => {
+        .catch((e) => {
+          notify.apiError(e);
           setDetail(null);
           setDetailFeedback({ kind: "err", text: "Grupo não encontrado ou sem permissão." });
         })
@@ -177,7 +188,6 @@ export default function TrainerGroupsPage() {
   );
 
   function openCreateModal() {
-    setMsg(null);
     setCreateError("");
     setCreateName("");
     setCreateDescription("");
@@ -188,6 +198,7 @@ export default function TrainerGroupsPage() {
   async function submitCreate() {
     setCreateError("");
     if (!createName.trim() || !createTemplateId) {
+      notify.warning("Nome e modelo de treino são obrigatórios.");
       setCreateError("Nome e modelo de treino são obrigatórios.");
       return;
     }
@@ -203,8 +214,9 @@ export default function TrainerGroupsPage() {
       });
       setCreateOpen(false);
       load();
-      setMsg("Grupo criado.");
+      notify.success("Grupo criado.");
     } catch (e) {
+      notify.apiError(e);
       setCreateError(e instanceof Error ? e.message : "Erro ao criar grupo");
     } finally {
       setCreateSaving(false);
@@ -231,7 +243,9 @@ export default function TrainerGroupsPage() {
       await refreshDetail(detailGroupId);
       load();
       setDetailFeedback({ kind: "ok", text: "Alterações salvas." });
+      notify.success("Grupo atualizado.");
     } catch (e) {
+      notify.apiError(e);
       setDetailFeedback({ kind: "err", text: e instanceof Error ? e.message : "Erro ao salvar." });
     } finally {
       setDetailSaving(false);
@@ -251,7 +265,9 @@ export default function TrainerGroupsPage() {
       await refreshDetail(detailGroupId);
       load();
       setDetailFeedback({ kind: "ok", text: "Aluna adicionada ao grupo." });
+      notify.success("Aluna adicionada ao grupo.");
     } catch (e) {
+      notify.apiError(e);
       setDetailFeedback({ kind: "err", text: e instanceof Error ? e.message : "Erro ao adicionar aluna." });
     } finally {
       setAddMemberSaving(false);
@@ -267,7 +283,9 @@ export default function TrainerGroupsPage() {
       await refreshDetail(detailGroupId);
       load();
       setDetailFeedback({ kind: "ok", text: "Aluna removida do grupo." });
+      notify.success("Aluna removida do grupo.");
     } catch (e) {
+      notify.apiError(e);
       setDetailFeedback({ kind: "err", text: e instanceof Error ? e.message : "Erro ao remover." });
     }
   }
@@ -279,8 +297,9 @@ export default function TrainerGroupsPage() {
       await api(`/trainer/workout-groups/${detailGroupId}`, { method: "DELETE" });
       closeDetail();
       load();
-      setMsg("Grupo excluído.");
+      notify.success("Grupo excluído.");
     } catch (e) {
+      notify.apiError(e);
       setDetailFeedback({ kind: "err", text: e instanceof Error ? e.message : "Erro ao excluir grupo." });
     }
   }
@@ -298,7 +317,6 @@ export default function TrainerGroupsPage() {
           Novo grupo
         </Button>
       </div>
-      {msg && <p className="mb-3 text-sm text-brand-800">{msg}</p>}
 
       {rows.length === 0 ? (
         <Card className="p-6 text-center text-sm text-ink-800/70">

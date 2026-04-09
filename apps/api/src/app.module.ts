@@ -12,6 +12,7 @@ import { StudentModule } from "./student/student.module";
 import { TrainerModule } from "./trainer/trainer.module";
 import { NutritionistModule } from "./nutritionist/nutritionist.module";
 import { AdminModule } from "./admin/admin.module";
+import { GroupEventsModule } from "./group-events/group-events.module";
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { AdminModule } from "./admin/admin.module";
     TrainerModule,
     NutritionistModule,
     AdminModule,
+    GroupEventsModule,
   ],
 })
 export class AppModule {}

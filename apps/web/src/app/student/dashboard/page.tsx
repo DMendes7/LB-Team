@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card, ProgressBar, StreakFire } from "@/components/ui";
 
@@ -23,13 +24,16 @@ export default function StudentDashboardPage() {
   useEffect(() => {
     api<Dashboard>("/student/dashboard")
       .then(setD)
-      .catch(() => setErr("Faça login como aluna."));
+      .catch((e) => {
+        notify.apiError(e);
+        setErr("auth");
+      });
   }, []);
 
   if (err || !d) {
     return (
       <div className="p-8 text-center">
-        <p className="text-ink-800">{err || "Carregando…"}</p>
+        <p className="text-ink-800">{err === "auth" ? "Sessão inválida ou sem permissão." : err || "Carregando…"}</p>
         <Link href="/login" className="mt-4 inline-block text-brand-700">
           Login
         </Link>

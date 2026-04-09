@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 
 type Program =
@@ -26,7 +27,10 @@ export default function WorkoutRunRedirectPage() {
         }
         router.replace("/student/workout");
       })
-      .catch(() => router.replace("/student/workout"));
+      .catch((e) => {
+        notify.apiError(e);
+        router.replace("/student/workout");
+      });
   }, [router]);
 
   return (

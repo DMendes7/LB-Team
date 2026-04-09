@@ -56,6 +56,11 @@ enum EngagementTone {
   DEFAULT
 }
 
+/// Métrica de ranking em eventos de grupo (hoje: só treinos completos no período).
+enum GroupEventMetric {
+  WORKOUT_COMPLETIONS
+}
+
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -81,11 +86,13 @@ model User {
   workoutTemplates    WorkoutTemplate[]     @relation("WorkoutTemplateAuthor")
   privateWorkoutTemplates WorkoutTemplate[] @relation("PrivateWorkoutTemplates")
   workoutGroupsOwned  WorkoutGroup[]
+  groupEventsCreated  GroupEvent[]         @relation("GroupEventTrainer")
   nutritionTemplates  NutritionTemplate[]   @relation("NutritionTemplateAuthor")
   nutritionGroupsOwned NutritionGroup[]
 
   workoutGroupMemberships  WorkoutGroupUser[]
   nutritionGroupMemberships NutritionGroupUser[]
+  groupEventScores         GroupEventScore[]
 
   /// Treinos nomeados atribuídos à aluna por um personal (plano individual com N fichas).
   workoutSlotsReceived StudentWorkoutSlot[] @relation("WorkoutSlotStudent")
@@ -312,6 +319,57 @@ model WorkoutGroup {
   trainer  User              @relation(fields: [trainerId], references: [id], onDelete: Cascade)
   template WorkoutTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
   members  WorkoutGroupUser[]
+  events   GroupEvent[]
+}
+
+model GroupEvent {
+  id          String           @id @default(cuid())
+  groupId     String           @map("group_id")
+  trainerId   String           @map("trainer_id")
+  name        String
+  description String?          @db.Text
+  /// Prêmio / tema em texto livre (ex.: “Desafio abril — premiação em dinheiro”)
+  prizeNote   String?          @map("prize_note") @db.Text
+  startsAt    DateTime         @map("starts_at")
+  endsAt      DateTime         @map("ends_at")
+  metric      GroupEventMetric @default(WORKOUT_COMPLETIONS) @map("metric")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  group      WorkoutGroup           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  trainer    User                   @relation("GroupEventTrainer", fields: [trainerId], references: [id], onDelete: Cascade)
+  prizeTiers GroupEventPrizeTier[]
+  scores     GroupEventScore[]
+
+  @@index([groupId])
+  @@index([trainerId])
+  @@index([endsAt])
+  @@map("group_events")
+}
+
+model GroupEventPrizeTier {
+  id         String @id @default(cuid())
+  eventId    String @map("event_id")
+  /// 1 = 1.º lugar, 2 = 2.º, …
+  place      Int
+  prizeLabel String @map("prize_label") @db.Text
+
+  event GroupEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, place])
+  @@map("group_event_prize_tiers")
+}
+
+model GroupEventScore {
+  eventId      String @map("event_id")
+  studentId    String @map("student_id")
+  workoutCount Int    @default(0) @map("workout_count")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  event   GroupEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  student User       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, studentId])
+  @@map("group_event_scores")
 }
 
 model WorkoutGroupUser {

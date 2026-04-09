@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, apiForm } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
@@ -46,12 +47,16 @@ export default function TrainerExercisesPage() {
   const [rows, setRows] = useState<ExerciseRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [msg, setMsg] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api<ExerciseRow[]>("/trainer/exercises").then(setRows).catch(() => setRows([]));
+    api<ExerciseRow[]>("/trainer/exercises")
+      .then(setRows)
+      .catch((e) => {
+        notify.apiError(e);
+        setRows([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -61,7 +66,6 @@ export default function TrainerExercisesPage() {
   function startCreate() {
     setEditingId("new");
     setForm(emptyForm);
-    setMsg(null);
   }
 
   function startEdit(e: ExerciseRow) {
@@ -81,11 +85,9 @@ export default function TrainerExercisesPage() {
       tags: e.tags ?? "",
       technicalNotes: e.technicalNotes ?? "",
     });
-    setMsg(null);
   }
 
   async function save() {
-    setMsg(null);
     const body = {
       name: form.name.trim(),
       category: form.category.trim(),
@@ -102,47 +104,49 @@ export default function TrainerExercisesPage() {
       technicalNotes: form.technicalNotes.trim() || undefined,
     };
     if (!body.name || !body.muscleGroup) {
-      setMsg("Nome e grupo muscular são obrigatórios.");
+      notify.warning("Nome e grupo muscular são obrigatórios.");
       return;
     }
     try {
       if (editingId === "new") {
         await api("/trainer/exercises", { method: "POST", body: JSON.stringify(body) });
+        notify.success("Exercício criado.");
       } else if (editingId) {
         await api(`/trainer/exercises/${editingId}`, { method: "PATCH", body: JSON.stringify(body) });
+        notify.success("Exercício atualizado.");
       }
       setEditingId(null);
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro ao salvar");
+      notify.apiError(e);
     }
   }
 
   async function executeDeleteExercise() {
     const id = confirmDeleteId;
     if (!id) return;
-    setMsg(null);
     try {
       await api(`/trainer/exercises/${id}`, { method: "DELETE" });
       if (editingId === id) setEditingId(null);
       setConfirmDeleteId(null);
+      notify.success("Exercício excluído.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro ao excluir");
+      notify.apiError(e);
     }
   }
 
   async function onVideoFile(id: string, file: File | null) {
     if (!file) return;
     setUploadingId(id);
-    setMsg(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
       await apiForm(`/trainer/exercises/${id}/video`, fd);
+      notify.success("Vídeo enviado.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Falha no upload");
+      notify.apiError(e);
     } finally {
       setUploadingId(null);
     }
@@ -151,9 +155,10 @@ export default function TrainerExercisesPage() {
   async function clearUploadedVideo(id: string) {
     try {
       await api(`/trainer/exercises/${id}/video`, { method: "DELETE" });
+      notify.success("Vídeo removido.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro ao remover vídeo");
+      notify.apiError(e);
     }
   }
 
@@ -163,7 +168,6 @@ export default function TrainerExercisesPage() {
         Cadastre exercícios com vídeo por <strong>link</strong> (YouTube, Vimeo, URL direta) ou envie um arquivo{" "}
         <strong>MP4 / MOV / WebM</strong>. As alunas veem o vídeo na tela do treino.
       </p>
-      {msg && <p className="mb-3 text-sm text-red-700">{msg}</p>}
       <div className="mb-6">
         <Button type="button" onClick={startCreate}>
           Novo exercício

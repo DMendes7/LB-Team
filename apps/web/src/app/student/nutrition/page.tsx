@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
 
@@ -20,7 +21,10 @@ export default function StudentNutritionPage() {
   useEffect(() => {
     api("/student/nutrition-plan")
       .then(setData)
-      .catch(() => setData({ template: null }));
+      .catch((e) => {
+        notify.apiError(e);
+        setData({ template: null });
+      });
     api("/student/nutrition/open", { method: "POST", body: "{}" }).catch(() => {});
   }, []);
 

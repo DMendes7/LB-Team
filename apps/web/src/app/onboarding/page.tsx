@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { Button, Card } from "@/components/ui";
 
 export default function OnboardingPage() {
@@ -17,11 +18,8 @@ export default function OnboardingPage() {
   const [equipmentNotes, setEquipmentNotes] = useState("Halteres, elástico");
   const [focusRegions, setFocusRegions] = useState("Glúteos, pernas");
   const [energyCycleNotes, setEnergyCycleNotes] = useState("");
-  const [err, setErr] = useState("");
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErr("");
     try {
       await api("/onboarding", {
         method: "POST",
@@ -41,9 +39,10 @@ export default function OnboardingPage() {
             : undefined,
         }),
       });
+      notify.success("Perfil salvo. Bem-vinda ao seu espaço!");
       router.push("/student/dashboard");
-    } catch {
-      setErr("Salve o login novamente ou complete como aluna.");
+    } catch (e) {
+      notify.apiError(e);
     }
   }
 
@@ -145,7 +144,6 @@ export default function OnboardingPage() {
               onChange={(e) => setEnergyCycleNotes(e.target.value)}
             />
           </div>
-          {err && <p className="text-sm text-red-600">{err}</p>}
           <Button type="submit" className="w-full">
             Gerar meu plano inicial
           </Button>

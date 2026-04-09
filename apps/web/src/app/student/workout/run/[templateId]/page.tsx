@@ -7,6 +7,7 @@ import { ExerciseVideoPanel } from "@/components/ExerciseVideoPanel";
 import { getPrescriptionBlocks } from "@/lib/prescription-blocks";
 import { parseWeightsInput, totalSetsForRow } from "@/lib/workout-weights";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
 
@@ -99,6 +100,7 @@ export default function WorkoutRunWithTemplatePage() {
     }>(`/student/workout-session?templateId=${encodeURIComponent(templateId)}`)
       .then((r) => {
         if (!r.template) {
+          notify.warning("Treino não encontrado.");
           setErr("Treino não encontrado.");
           return;
         }
@@ -118,7 +120,10 @@ export default function WorkoutRunWithTemplatePage() {
           })),
         );
       })
-      .catch(() => setErr("Sem acesso a este treino."));
+      .catch((e) => {
+        notify.apiError(e);
+        setErr("Sem acesso a este treino.");
+      });
   }, [templateId]);
 
   useEffect(() => {
@@ -135,8 +140,11 @@ export default function WorkoutRunWithTemplatePage() {
           setStartedAt(s.startedAt);
         }
       })
-      .catch(() => {
-        if (!cancelled) setStartErr("Não foi possível iniciar o registro do treino. Tente sair e entrar de novo.");
+      .catch((e) => {
+        if (!cancelled) {
+          notify.apiError(e);
+          setStartErr("Não foi possível iniciar o registro do treino. Tente sair e entrar de novo.");
+        }
       });
     return () => {
       cancelled = true;
@@ -209,8 +217,10 @@ export default function WorkoutRunWithTemplatePage() {
           exercises,
         }),
       });
+      notify.success("Treino registrado com sucesso.");
       router.push("/student/history");
     } catch (e) {
+      notify.apiError(e);
       setFinishErr(e instanceof Error ? e.message : "Não foi possível encerrar.");
     } finally {
       setSaving(false);

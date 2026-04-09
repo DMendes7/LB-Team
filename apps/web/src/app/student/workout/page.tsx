@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui";
 
@@ -18,7 +19,12 @@ export default function StudentWorkoutProgramPage() {
   const [program, setProgram] = useState<Program | null>(null);
 
   useEffect(() => {
-    api<Program>("/student/workout-program").then(setProgram).catch(() => setProgram({ mode: "none" }));
+    api<Program>("/student/workout-program")
+      .then(setProgram)
+      .catch((e) => {
+        notify.apiError(e);
+        setProgram({ mode: "none" });
+      });
   }, []);
 
   return (

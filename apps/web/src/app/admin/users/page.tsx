@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui";
 
@@ -11,7 +12,10 @@ export default function AdminUsersPage() {
   useEffect(() => {
     api<{ id: string; email: string; name: string; role: string }[]>("/admin/users")
       .then(setRows)
-      .catch(() => setRows([]));
+      .catch((e) => {
+        notify.apiError(e);
+        setRows([]);
+      });
   }, []);
 
   return (

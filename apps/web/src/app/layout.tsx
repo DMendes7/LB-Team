@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Outfit } from "next/font/google";
+import { AppToaster } from "@/components/AppToaster";
 import "./globals.css";
 
 const dm = DM_Sans({ subsets: ["latin"], variable: "--font-dm-sans" });
@@ -13,7 +14,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" className={`${dm.variable} ${outfit.variable}`}>
-      <body className="font-sans min-h-screen">{children}</body>
+      <body className="font-sans min-h-screen">
+        {children}
+        <AppToaster />
+      </body>
     </html>
   );
 }

@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
 
@@ -136,11 +137,9 @@ function TrainerWorkoutsPageInner() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [days, setDays] = useState<WorkoutDayDraft[]>([]);
-  const [msg, setMsg] = useState<string | null>(null);
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState(false);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
-  const editorFeedbackRef = useRef<HTMLDivElement>(null);
 
   const loadTemplates = useCallback((): Promise<void> => {
     return api<TemplateFull[]>("/trainer/workout-templates")
@@ -148,14 +147,17 @@ function TrainerWorkoutsPageInner() {
         setTemplates(rows);
         setLibraryLoaded(true);
       })
-      .catch(() => {
+      .catch((e) => {
+        notify.apiError(e);
         setTemplates([]);
         setLibraryLoaded(true);
       });
   }, []);
 
   useEffect(() => {
-    api<ExerciseRef[]>("/trainer/exercises").then(setCatalog);
+    api<ExerciseRef[]>("/trainer/exercises")
+      .then(setCatalog)
+      .catch((e) => notify.apiError(e));
     loadTemplates();
   }, [loadTemplates]);
 
@@ -191,30 +193,23 @@ function TrainerWorkoutsPageInner() {
       .then((t) => {
         if (!cancelled) selectTemplate(t);
       })
-      .catch(() => {
-        if (!cancelled) setMsg("Ficha não encontrada ou sem permissão.");
+      .catch((e) => {
+        if (!cancelled) {
+          notify.apiError(e);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [tParam, libraryLoaded, templates, selectTemplate]);
 
-  const prevTParamRef = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (prevTParamRef.current !== undefined && prevTParamRef.current !== tParam) {
-      setMsg(null);
-    }
-    prevTParamRef.current = tParam;
-  }, [tParam]);
-
   useEffect(() => {
     if (searchParams.get("treinoSalvo") !== "1") return;
-    setMsg("Treino salvo com sucesso.");
+    notify.success("Treino salvo com sucesso.");
     router.replace(pathname);
   }, [searchParams, pathname, router]);
 
   async function createNew() {
-    setMsg(null);
     try {
       const t = await api<TemplateFull>("/trainer/workout-templates", {
         method: "POST",
@@ -224,21 +219,20 @@ function TrainerWorkoutsPageInner() {
           days: [{ dayIndex: 0, name: "Dia 1", exercises: [] }],
         }),
       });
+      notify.success("Modelo criado.");
       loadTemplates();
       selectTemplate(t);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro ao criar");
+      notify.apiError(e);
     }
   }
 
   async function save() {
     if (!selectedId) return;
     if (!days.length) {
-      setMsg("Adicione pelo menos um dia ao treino antes de salvar.");
-      editorFeedbackRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      notify.warning("Adicione pelo menos um dia ao treino antes de salvar.");
       return;
     }
-    setMsg(null);
     setSaveBusy(true);
     const body = {
       name: name.trim() || "Treino",
@@ -279,8 +273,7 @@ function TrainerWorkoutsPageInner() {
         router.replace(`${pathname}?treinoSalvo=1`);
       }
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro ao salvar. Verifique a conexão ou tente de novo.");
-      editorFeedbackRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      notify.apiError(e);
     } finally {
       setSaveBusy(false);
     }
@@ -288,15 +281,15 @@ function TrainerWorkoutsPageInner() {
 
   async function executeDeleteTemplate() {
     if (!selectedId) return;
-    setMsg(null);
     try {
       await api(`/trainer/workout-templates/${selectedId}`, { method: "DELETE" });
       setConfirmDeleteTemplate(false);
       setSelectedId(null);
       setDays([]);
+      notify.success("Modelo excluído.");
       loadTemplates();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro ao excluir");
+      notify.apiError(e);
     }
   }
 
@@ -422,19 +415,6 @@ function TrainerWorkoutsPageInner() {
         Defina <strong>cadência</strong> e <strong>blocos</strong> (ex.: 3×6–8 e depois 2×8–10) como na ficha. O vídeo continua no{" "}
         <strong>exercício</strong> do banco — a aluna vê ao lado na ficha.
       </p>
-      {msg && !selectedId && (
-        <p
-          className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
-            msg === "Treino salvo com sucesso."
-              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-              : "border-amber-200 bg-amber-50 text-amber-950"
-          }`}
-          role="status"
-        >
-          {msg}
-        </p>
-      )}
-
       <div className="mb-6 flex flex-wrap gap-2">
         <Button type="button" onClick={createNew}>
           Novo treino
@@ -453,7 +433,6 @@ function TrainerWorkoutsPageInner() {
                     selectedId === t.id ? "bg-brand-100 font-medium text-brand-900" : "hover:bg-brand-50/80"
                   }`}
                   onClick={() => {
-                    setMsg(null);
                     selectTemplate(t);
                   }}
                 >
@@ -478,19 +457,6 @@ function TrainerWorkoutsPageInner() {
         <div>
           {selectedId ? (
             <Card>
-              {msg && (
-                <div
-                  ref={editorFeedbackRef}
-                  className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
-                    msg.startsWith("Salvo")
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-amber-200 bg-amber-50 text-amber-950"
-                  }`}
-                  role="status"
-                >
-                  {msg}
-                </div>
-              )}
               <div className="flex flex-wrap items-end gap-3">
                 <label className="flex-1 min-w-[200px] text-sm">
                   <span className="text-ink-800/70">Nome do treino</span>

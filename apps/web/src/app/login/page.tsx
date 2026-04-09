@@ -4,30 +4,29 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, setToken } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { Button, Card } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [err, setErr] = useState("");
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setErr("");
     try {
       const res = await api<{ accessToken: string; user: { role: string } }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
       setToken(res.accessToken);
+      notify.success("Login feito com sucesso.");
       const r = res.user.role;
       if (r === "STUDENT") router.push("/student/dashboard");
       else if (r === "TRAINER") router.push("/trainer/dashboard");
       else if (r === "NUTRITIONIST") router.push("/nutritionist/dashboard");
       else router.push("/admin/dashboard");
-    } catch {
-      setErr("Não foi possível entrar. Verifique e-mail e senha.");
+    } catch (e) {
+      notify.apiError(e);
     }
   }
 
@@ -57,7 +56,6 @@ export default function LoginPage() {
               required
             />
           </div>
-          {err && <p className="text-sm text-red-600">{err}</p>}
           <Button type="submit" className="w-full">
             Entrar
           </Button>

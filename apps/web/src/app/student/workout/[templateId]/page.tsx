@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ExerciseVideoPanel } from "@/components/ExerciseVideoPanel";
 import { getPrescriptionBlocks } from "@/lib/prescription-blocks";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
 
@@ -47,7 +48,8 @@ export default function StudentWorkoutSessionPage() {
     setErr("");
     api<WorkoutRes>(`/student/workout-session?templateId=${encodeURIComponent(templateId)}`)
       .then(setW)
-      .catch(() => {
+      .catch((e) => {
+        notify.apiError(e);
         setW(null);
         setErr("Não foi possível carregar este treino.");
       });

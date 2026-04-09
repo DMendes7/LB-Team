@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { formatWeightsRecorded } from "@/lib/workout-weights";
 import { AppShell } from "@/components/AppShell";
 import { StreakFireIcon } from "@/components/icons/StreakFireIcon";
@@ -143,7 +144,6 @@ function TrainerStudentDetailPageInner() {
   const [addingAnotherGroup, setAddingAnotherGroup] = useState(false);
   const [groupToRemove, setGroupToRemove] = useState<{ id: string; name: string } | null>(null);
   const [slotToRemove, setSlotToRemove] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [libraryModalOpen, setLibraryModalOpen] = useState(false);
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [libLabel, setLibLabel] = useState("");
@@ -158,7 +158,12 @@ function TrainerStudentDetailPageInner() {
 
   const load = useCallback(() => {
     if (!id) return;
-    api<DetailRes>(`/trainer/students/${id}?month=${month}`).then(setData).catch(() => setData(null));
+    api<DetailRes>(`/trainer/students/${id}?month=${month}`)
+      .then(setData)
+      .catch((e) => {
+        notify.apiError(e);
+        setData(null);
+      });
   }, [id, month]);
 
   useEffect(() => {
@@ -169,16 +174,15 @@ function TrainerStudentDetailPageInner() {
   useEffect(() => {
     if (searchParams.get("treinoSalvo") !== "1" || !id) return;
     setTreinoSalvoFlash(true);
-    setMsg(null);
     router.replace(pathname);
     load();
   }, [searchParams, id, pathname, router, load]);
 
   useEffect(() => {
-    api<TemplateOpt[]>("/trainer/workout-templates").then((rows) =>
-      setTemplates(rows.map((t) => ({ id: t.id, name: t.name }))),
-    );
-    api<GroupOpt[]>("/trainer/workout-groups").then(setGroups);
+    api<TemplateOpt[]>("/trainer/workout-templates")
+      .then((rows) => setTemplates(rows.map((t) => ({ id: t.id, name: t.name }))))
+      .catch((e) => notify.apiError(e));
+    api<GroupOpt[]>("/trainer/workout-groups").then(setGroups).catch((e) => notify.apiError(e));
   }, []);
 
   /** Se o modal abrir antes da lista de modelos carregar, o select ficava sem valor — botão não funcionava. */
@@ -230,7 +234,8 @@ function TrainerStudentDetailPageInner() {
         `/trainer/students/${id}/workout-completions/${completionId}`,
       );
       setWorkoutDetail(d);
-    } catch {
+    } catch (e) {
+      notify.apiError(e);
       setWorkoutDetail(null);
     } finally {
       setWorkoutDetailLoading(false);
@@ -239,31 +244,29 @@ function TrainerStudentDetailPageInner() {
 
   async function addToGroup() {
     if (!id || !pickGroup) return;
-    setMsg(null);
     try {
       await api(`/trainer/workout-groups/${pickGroup}/members`, {
         method: "POST",
         body: JSON.stringify({ studentIds: [id] }),
       });
-      setMsg("Aluna incluída no grupo.");
+      notify.success("Aluna incluída no grupo.");
       setPickGroup("");
       setAddingAnotherGroup(false);
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
   async function executeRemoveFromGroup() {
     if (!id || !groupToRemove) return;
-    setMsg(null);
     try {
       await api(`/trainer/workout-groups/${groupToRemove.id}/members/${id}`, { method: "DELETE" });
       setGroupToRemove(null);
-      setMsg("Aluna removida do grupo.");
+      notify.success("Aluna removida do grupo.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
@@ -287,7 +290,6 @@ function TrainerStudentDetailPageInner() {
       setLibraryModalError("Escolha um modelo da biblioteca.");
       return;
     }
-    setMsg(null);
     setSlotSaving(true);
     try {
       await api(`/trainer/students/${id}/workout-slots`, {
@@ -298,9 +300,10 @@ function TrainerStudentDetailPageInner() {
       setLibTemplateId("");
       setLibraryModalOpen(false);
       setLibraryModalError("");
-      setMsg("Treino da biblioteca vinculado.");
+      notify.success("Treino da biblioteca vinculado.");
       load();
     } catch (e) {
+      notify.apiError(e);
       setLibraryModalError(e instanceof Error ? e.message : "Não foi possível vincular. Tente de novo.");
     } finally {
       setSlotSaving(false);
@@ -313,7 +316,6 @@ function TrainerStudentDetailPageInner() {
       setCustomModalError("Dê um nome ao treino — é assim que a aluna identifica na lista (obrigatório).");
       return;
     }
-    setMsg(null);
     setSlotSaving(true);
     try {
       const created = await api<WorkoutSlotCreated>(`/trainer/students/${id}/workout-slots`, {
@@ -323,8 +325,10 @@ function TrainerStudentDetailPageInner() {
       setCustomLabel("");
       setCustomModalOpen(false);
       setCustomModalError("");
+      notify.success("Treino criado. Abrindo o editor…");
       router.push(editorHref(created.template.id));
     } catch (e) {
+      notify.apiError(e);
       setCustomModalError(e instanceof Error ? e.message : "Não foi possível criar. Tente de novo.");
     } finally {
       setSlotSaving(false);
@@ -333,14 +337,13 @@ function TrainerStudentDetailPageInner() {
 
   async function executeRemoveSlot() {
     if (!id || !slotToRemove) return;
-    setMsg(null);
     try {
       await api(`/trainer/students/${id}/workout-slots/${slotToRemove}`, { method: "DELETE" });
       setSlotToRemove(null);
-      setMsg("Treino removido da aluna.");
+      notify.success("Treino removido da aluna.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
@@ -356,7 +359,6 @@ function TrainerStudentDetailPageInner() {
   const showGroupAddRow = workoutGroups.length === 0 || addingAnotherGroup;
 
   function openLibraryModal() {
-    setMsg(null);
     setLibraryModalError("");
     setLibLabel("");
     setLibTemplateId(templates[0]?.id ?? "");
@@ -364,7 +366,6 @@ function TrainerStudentDetailPageInner() {
   }
 
   function openCustomModal() {
-    setMsg(null);
     setCustomModalError("");
     setCustomLabel("");
     setCustomModalOpen(true);
@@ -380,7 +381,6 @@ function TrainerStudentDetailPageInner() {
           Treino salvo com sucesso. A ficha já está atualizada para a aluna.
         </p>
       )}
-      {msg && <p className="mb-3 text-sm text-brand-800">{msg}</p>}
 
       {!data && <p className="text-sm text-ink-800/75">Carregando…</p>}
 

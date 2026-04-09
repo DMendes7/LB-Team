@@ -10,6 +10,11 @@ body {
   @apply antialiased text-ink-900 bg-brand-50/30;
 }
 
+/* Toasts (Sonner) acima do header fixo */
+[data-sonner-toaster] {
+  z-index: 100;
+}
+
 ::selection {
   @apply bg-brand-200 text-brand-900;
 }

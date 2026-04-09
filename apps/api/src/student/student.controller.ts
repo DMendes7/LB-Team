@@ -19,6 +19,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { WorkoutResolveService } from "../workouts/workout-resolve.service";
 import { GamificationService } from "../gamification/gamification.service";
 import { StudentLinksService } from "../student-links/student-links.service";
+import { GroupEventsService } from "../group-events/group-events.service";
 import { startOfWeekUtc } from "../common/week";
 
 function parseMonthKey(month?: string): { y: number; m: number } {
@@ -67,6 +68,7 @@ export class StudentController {
     private resolve: WorkoutResolveService,
     private gamification: GamificationService,
     private studentLinks: StudentLinksService,
+    private groupEvents: GroupEventsService,
   ) {}
 
   @Get("dashboard")
@@ -209,6 +211,7 @@ export class StudentController {
     });
 
     await this.gamification.afterWorkoutCompleted(u.sub);
+    await this.groupEvents.recordWorkoutCompletion(u.sub, now);
 
     if (body.disposition !== undefined && body.disposition !== null) {
       if (!Object.values(DispositionToday).includes(body.disposition)) {
@@ -318,6 +321,9 @@ export class StudentController {
     });
 
     await this.gamification.afterWorkoutCompleted(u.sub);
+    if (completion.completedAt) {
+      await this.groupEvents.recordWorkoutCompletion(u.sub, completion.completedAt);
+    }
 
     if (body.disposition !== undefined && body.disposition !== null) {
       if (!Object.values(DispositionToday).includes(body.disposition)) {

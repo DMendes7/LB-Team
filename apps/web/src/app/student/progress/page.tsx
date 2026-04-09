@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Card, ProgressBar, StreakFireVisual } from "@/components/ui";
 
@@ -13,7 +14,9 @@ export default function ProgressPage() {
   } | null>(null);
 
   useEffect(() => {
-    api("/student/dashboard").then(setD);
+    api("/student/dashboard")
+      .then(setD)
+      .catch((e) => notify.apiError(e));
   }, []);
 
   return (

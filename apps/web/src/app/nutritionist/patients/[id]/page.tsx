@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card } from "@/components/ui";
 
@@ -36,11 +37,14 @@ export default function NutritionistPatientDetailPage() {
   const [pickTemplate, setPickTemplate] = useState("");
   const [pickGroup, setPickGroup] = useState("");
   const [note, setNote] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-
   const load = useCallback(() => {
     if (!id) return;
-    api<DetailRes>(`/nutritionist/patients/${id}`).then(setData).catch(() => setData(null));
+    api<DetailRes>(`/nutritionist/patients/${id}`)
+      .then(setData)
+      .catch((e) => {
+        notify.apiError(e);
+        setData(null);
+      });
   }, [id]);
 
   useEffect(() => {
@@ -48,64 +52,64 @@ export default function NutritionistPatientDetailPage() {
   }, [load]);
 
   useEffect(() => {
-    api<TemplateOpt[]>("/nutritionist/templates").then((t) => setTemplates(t.map((x) => ({ id: x.id, title: x.title }))));
-    api<GroupOpt[]>("/nutritionist/groups").then((g) => setGroups(g.map((x) => ({ id: x.id, name: x.name }))));
+    api<TemplateOpt[]>("/nutritionist/templates")
+      .then((t) => setTemplates(t.map((x) => ({ id: x.id, title: x.title }))))
+      .catch((e) => notify.apiError(e));
+    api<GroupOpt[]>("/nutritionist/groups")
+      .then((g) => setGroups(g.map((x) => ({ id: x.id, name: x.name }))))
+      .catch((e) => notify.apiError(e));
   }, []);
 
   async function assignOverride() {
     if (!id || !pickTemplate) return;
-    setMsg(null);
     try {
       await api(`/nutritionist/patients/${id}/override`, {
         method: "POST",
         body: JSON.stringify({ templateId: pickTemplate }),
       });
-      setMsg("Plano nutricional individual aplicado.");
+      notify.success("Plano nutricional individual aplicado.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
   async function clearOverride() {
     if (!id) return;
-    setMsg(null);
     try {
       await api(`/nutritionist/patients/${id}/nutrition-override`, { method: "DELETE" });
-      setMsg("Plano individual removido.");
+      notify.success("Plano individual removido.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
   async function addToGroup() {
     if (!id || !pickGroup) return;
-    setMsg(null);
     try {
       await api(`/nutritionist/groups/${pickGroup}/members`, {
         method: "POST",
         body: JSON.stringify({ studentIds: [id] }),
       });
-      setMsg("Paciente incluído no grupo.");
+      notify.success("Paciente incluído no grupo.");
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
   async function sendNote() {
     if (!id || !note.trim()) return;
-    setMsg(null);
     try {
       await api(`/nutritionist/patients/${id}/notes`, {
         method: "POST",
         body: JSON.stringify({ text: note.trim() }),
       });
       setNote("");
-      setMsg("Observação registrada.");
+      notify.success("Observação registrada.");
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Erro");
+      notify.apiError(e);
     }
   }
 
@@ -114,7 +118,6 @@ export default function NutritionistPatientDetailPage() {
 
   return (
     <AppShell role="NUTRITIONIST" title={s?.name ?? "Paciente"}>
-      {msg && <p className="mb-3 text-sm text-brand-800">{msg}</p>}
       {!data && <p className="text-sm text-ink-800/75">Carregando…</p>}
       {s && (
         <div className="space-y-4">

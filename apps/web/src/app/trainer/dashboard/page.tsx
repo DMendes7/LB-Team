@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui";
 
@@ -10,7 +11,12 @@ export default function TrainerDashboardPage() {
   const [d, setD] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
-    api("/trainer/dashboard").then(setD).catch(() => setD(null));
+    api("/trainer/dashboard")
+      .then(setD)
+      .catch((e) => {
+        notify.apiError(e);
+        setD(null);
+      });
   }, []);
 
   if (!d) return <p className="p-8 text-center">Acesso restrito ao personal.</p>;

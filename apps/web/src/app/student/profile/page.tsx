@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui";
 
@@ -9,7 +10,9 @@ export default function ProfilePage() {
   const [me, setMe] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
-    api("/auth/me").then(setMe);
+    api("/auth/me")
+      .then(setMe)
+      .catch((e) => notify.apiError(e));
   }, []);
 
   return (
