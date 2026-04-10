@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
+import { EventPodium } from "@/components/EventPodium";
 import { Card } from "@/components/ui";
 
 type LeaderRow = {
@@ -89,45 +90,58 @@ export default function StudentEventDetailPage() {
         )}
       </Card>
 
-      <Card>
-        <h2 className="font-display text-base font-semibold text-ink-900">
-          {event.status === "ended" ? "Classificação final" : "Ranking"}
-        </h2>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[280px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-brand-100 text-xs text-ink-800/60">
-                <th className="pb-2 pr-2">#</th>
-                <th className="pb-2 pr-2">Aluna</th>
-                <th className="pb-2 pr-2">Treinos</th>
-                <th className="pb-2">Prêmio</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leaderboard.map((r) => (
-                <tr
-                  key={r.studentId}
-                  className={
-                    my?.studentId === r.studentId
-                      ? "border-b border-brand-50 bg-brand-50/40"
-                      : "border-b border-brand-50"
-                  }
-                >
-                  <td className="py-2 pr-2 font-medium">{r.rank}</td>
-                  <td className="py-2 pr-2">
-                    {r.name}
-                    {my?.studentId === r.studentId ? (
-                      <span className="ml-1 text-xs font-medium text-brand-700">(você)</span>
-                    ) : null}
-                  </td>
-                  <td className="py-2 pr-2 tabular-nums">{r.workoutCount}</td>
-                  <td className="py-2 text-ink-800/80">{r.prizeLabel ?? "—"}</td>
+      {event.status === "ended" ? (
+        <Card className="overflow-hidden border-brand-200/80 bg-gradient-to-b from-white to-brand-50/30">
+          <p className="text-center font-display text-xs font-semibold uppercase tracking-wide text-brand-800">
+            Classificação final
+          </p>
+          <div role="region" aria-label="Pódio da classificação final" className="mt-4">
+            <EventPodium
+              leaderboard={leaderboard}
+              prizeTiers={event.prizeTiers}
+              highlightStudentId={my?.studentId ?? null}
+            />
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <h2 className="font-display text-base font-semibold text-ink-900">Ranking</h2>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[280px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-brand-100 text-xs text-ink-800/60">
+                  <th className="pb-2 pr-2">#</th>
+                  <th className="pb-2 pr-2">Aluna</th>
+                  <th className="pb-2 pr-2">Treinos</th>
+                  <th className="pb-2">Prêmio</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              </thead>
+              <tbody>
+                {leaderboard.map((r) => (
+                  <tr
+                    key={r.studentId}
+                    className={
+                      my?.studentId === r.studentId
+                        ? "border-b border-brand-50 bg-brand-50/40"
+                        : "border-b border-brand-50"
+                    }
+                  >
+                    <td className="py-2 pr-2 font-medium">{r.rank}</td>
+                    <td className="py-2 pr-2">
+                      {r.name}
+                      {my?.studentId === r.studentId ? (
+                        <span className="ml-1 text-xs font-medium text-brand-700">(você)</span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-2 tabular-nums">{r.workoutCount}</td>
+                    <td className="py-2 text-ink-800/80">{r.prizeLabel ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </AppShell>
   );
 }

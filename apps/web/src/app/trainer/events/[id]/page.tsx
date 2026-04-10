@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
+import { EventPodium } from "@/components/EventPodium";
 import { Button, Card } from "@/components/ui";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -103,11 +104,24 @@ export default function TrainerEventDetailPage() {
         </Button>
       </Card>
 
+      {event.status === "ended" && (
+        <Card className="mb-4 overflow-hidden border-brand-200/80 bg-gradient-to-b from-white to-brand-50/30">
+          <p className="text-center font-display text-xs font-semibold uppercase tracking-wide text-brand-800">
+            Pódio final
+          </p>
+          <div role="region" aria-label="Pódio dos primeiros lugares com prêmio" className="mt-4">
+            <EventPodium leaderboard={leaderboard} prizeTiers={event.prizeTiers} />
+          </div>
+        </Card>
+      )}
+
       <Card>
-        <h2 className="font-display text-base font-semibold text-ink-900">Ranking</h2>
+        <h2 className="font-display text-base font-semibold text-ink-900">
+          {event.status === "ended" ? "Todos os participantes" : "Ranking"}
+        </h2>
         <p className="mt-1 text-xs text-ink-800/60">
           {event.status === "ended"
-            ? "Classificação final. Prêmios conforme lugares configurados."
+            ? "Classificação completa do grupo no período do evento."
             : "Atualiza a cada treino concluído no período."}
         </p>
         <div className="mt-4 overflow-x-auto">
