@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
 import { Role } from "@prisma/client";
@@ -6,6 +11,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { StudentLinksService } from "../student-links/student-links.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
+import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 
 @Injectable()
 export class AuthService {
@@ -70,11 +77,64 @@ export class AuthService {
         phone: true,
         birthDate: true,
         role: true,
+        createdAt: true,
         profile: true,
         studentProfile: {
           include: { physicalLimitations: true, onboardingAnswers: true },
         },
       },
+    });
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const touched =
+      dto.name !== undefined ||
+      dto.phone !== undefined ||
+      dto.birthDate !== undefined ||
+      dto.weightKg !== undefined ||
+      dto.heightCm !== undefined;
+    if (!touched) {
+      throw new BadRequestException("Nenhum campo para atualizar.");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.phone !== undefined ? { phone: dto.phone.trim() || null } : {}),
+          ...(dto.birthDate !== undefined ? { birthDate: new Date(dto.birthDate) } : {}),
+        },
+      });
+
+      if (dto.weightKg !== undefined || dto.heightCm !== undefined) {
+        await tx.userProfile.upsert({
+          where: { userId },
+          create: {
+            userId,
+            weightKg: dto.weightKg ?? null,
+            heightCm: dto.heightCm ?? null,
+          },
+          update: {
+            ...(dto.weightKg !== undefined ? { weightKg: dto.weightKg } : {}),
+            ...(dto.heightCm !== undefined ? { heightCm: dto.heightCm } : {}),
+          },
+        });
+      }
+    });
+
+    return this.me(userId);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedException("Senha atual incorreta.");
+    const hash = await bcrypt.hash(dto.newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: hash },
     });
   }
 

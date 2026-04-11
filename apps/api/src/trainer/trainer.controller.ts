@@ -88,6 +88,40 @@ export class TrainerController {
     private gamification: GamificationService,
   ) {}
 
+  /** Planejamento semanal: pelo menos 2 dias, 0–6 sem repetir. */
+  private async validateGroupSchedule(
+    trainerId: string,
+    schedule: { dayOfWeek: number; templateId: string }[],
+  ): Promise<void> {
+    if (!schedule?.length || schedule.length < 2) {
+      throw new BadRequestException("Inclua pelo menos dois dias da semana com treino no planejamento do grupo.");
+    }
+    const seen = new Set<number>();
+    for (const row of schedule) {
+      if (row.dayOfWeek < 0 || row.dayOfWeek > 6 || !Number.isInteger(row.dayOfWeek)) {
+        throw new BadRequestException("Dia da semana inválido (use 0 = domingo … 6 = sábado).");
+      }
+      if (seen.has(row.dayOfWeek)) {
+        throw new BadRequestException("Cada dia da semana só pode ter um treino.");
+      }
+      seen.add(row.dayOfWeek);
+    }
+    const ids = [...new Set(schedule.map((s) => s.templateId))];
+    const tpls = await this.prisma.workoutTemplate.findMany({
+      where: { id: { in: ids }, trainerId },
+    });
+    if (tpls.length !== ids.length) {
+      throw new NotFoundException("Um dos modelos de treino não foi encontrado.");
+    }
+    for (const t of tpls) {
+      if (t.privateForStudentId) {
+        throw new BadRequestException(
+          "Fichas exclusivas de uma aluna não podem ser usadas em grupos. Use um modelo da biblioteca.",
+        );
+      }
+    }
+  }
+
   @Get("dashboard")
   async dashboard(
     @CurrentUser() u: JwtUser,
@@ -107,7 +141,11 @@ export class TrainerController {
 
     const groups = await this.prisma.workoutGroup.findMany({
       where: { trainerId: u.sub },
-      include: { _count: { select: { members: true } }, template: true },
+      include: {
+        _count: { select: { members: true } },
+        template: true,
+        days: { include: { template: { select: { id: true, name: true } } }, orderBy: { dayOfWeek: "asc" } },
+      },
       orderBy: { name: "asc" },
     });
 
@@ -320,7 +358,11 @@ export class TrainerController {
   workoutGroups(@CurrentUser() u: JwtUser) {
     return this.prisma.workoutGroup.findMany({
       where: { trainerId: u.sub },
-      include: { _count: { select: { members: true } }, template: true },
+      include: {
+        _count: { select: { members: true } },
+        template: true,
+        days: { include: { template: { select: { id: true, name: true } } }, orderBy: { dayOfWeek: "asc" } },
+      },
       orderBy: { name: "asc" },
     });
   }
@@ -331,6 +373,7 @@ export class TrainerController {
       where: { id: groupId, trainerId: u.sub },
       include: {
         template: { select: { id: true, name: true } },
+        days: { include: { template: { select: { id: true, name: true } } }, orderBy: { dayOfWeek: "asc" } },
         members: {
           orderBy: { joinedAt: "asc" },
           include: {
@@ -404,7 +447,14 @@ export class TrainerController {
             workoutGroupMemberships: {
               where: { group: { trainerId: u.sub } },
               orderBy: { joinedAt: "asc" },
-              include: { group: { include: { template: true } } },
+              include: {
+                group: {
+                  include: {
+                    template: true,
+                    days: { include: { template: true }, orderBy: { dayOfWeek: "asc" } },
+                  },
+                },
+              },
             },
           },
         },
@@ -462,7 +512,9 @@ export class TrainerController {
     const templateFromOverride =
       ov?.template && ov.template.trainerId === u.sub ? ov.template : null;
     const groupMemberships = link.student.workoutGroupMemberships;
-    const groupsWithTemplate = groupMemberships.filter((m) => m.group.template);
+    const groupsWithProgram = groupMemberships.filter(
+      (m) => m.group.template || (m.group.days && m.group.days.length > 0),
+    );
 
     let workoutAssignment:
       | {
@@ -511,29 +563,37 @@ export class TrainerController {
         },
         groupName: null,
       };
-    } else if (groupsWithTemplate.length > 1) {
+    } else if (groupsWithProgram.length > 1) {
       workoutAssignment = {
         kind: "groups",
-        groups: groupsWithTemplate.map((mem) => ({
-          groupName: mem.group.name,
+        groups: groupsWithProgram.map((mem) => {
+          const t = mem.group.days[0]?.template ?? mem.group.template!;
+          return {
+            groupName: mem.group.name,
+            template: {
+              id: t.id,
+              name: t.name,
+              description: t.description,
+            },
+          };
+        }),
+      };
+    } else if (groupsWithProgram.length === 1) {
+      const mem = groupsWithProgram[0];
+      const t = mem.group.days[0]?.template ?? mem.group.template;
+      if (!t) {
+        workoutAssignment = { kind: "none", template: null, groupName: null };
+      } else {
+        workoutAssignment = {
+          kind: "group",
           template: {
-            id: mem.group.template!.id,
-            name: mem.group.template!.name,
-            description: mem.group.template!.description,
+            id: t.id,
+            name: t.name,
+            description: t.description,
           },
-        })),
-      };
-    } else if (groupsWithTemplate.length === 1) {
-      const mem = groupsWithTemplate[0];
-      workoutAssignment = {
-        kind: "group",
-        template: {
-          id: mem.group.template!.id,
-          name: mem.group.template!.name,
-          description: mem.group.template!.description,
-        },
-        groupName: mem.group.name,
-      };
+          groupName: mem.group.name,
+        };
+      }
     } else {
       workoutAssignment = { kind: "none", template: null, groupName: null };
     }
@@ -569,7 +629,10 @@ export class TrainerController {
         workoutGroups: groupMemberships.map((mem) => ({
           groupId: mem.group.id,
           name: mem.group.name,
-          templateName: mem.group.template?.name ?? "—",
+          templateName:
+            mem.group.days && mem.group.days.length > 0
+              ? `Rotina (${mem.group.days.length} dias)`
+              : (mem.group.template?.name ?? "—"),
         })),
       },
     };
@@ -578,22 +641,60 @@ export class TrainerController {
   @Post("workout-groups")
   async createGroup(
     @CurrentUser() u: JwtUser,
-    @Body() body: { name: string; description?: string; templateId: string },
+    @Body()
+    body: {
+      name: string;
+      description?: string;
+      /** Um treino por dia da semana (0=dom … 6=sab); mínimo 2 dias. */
+      schedule: { dayOfWeek: number; templateId: string }[];
+      /** Opcional: alunas já entram no grupo na criação (mesmas regras de vínculo). */
+      studentIds?: string[];
+    },
   ) {
-    const tpl = await this.prisma.workoutTemplate.findFirst({
-      where: { id: body.templateId, trainerId: u.sub },
-    });
-    if (!tpl) throw new NotFoundException("Modelo de treino não encontrado.");
-    if (tpl.privateForStudentId) {
-      throw new BadRequestException("Fichas exclusivas de uma aluna não podem ser usadas em grupos. Use um modelo da biblioteca.");
-    }
-    return this.prisma.workoutGroup.create({
-      data: {
-        trainerId: u.sub,
-        name: body.name,
-        description: body.description,
-        templateId: body.templateId,
-      },
+    if (!body.name?.trim()) throw new BadRequestException("Nome do grupo é obrigatório.");
+    await this.validateGroupSchedule(u.sub, body.schedule);
+    const studentIds = [...new Set((body.studentIds ?? []).map((id) => id.trim()).filter(Boolean))];
+
+    return this.prisma.$transaction(async (tx) => {
+      const g = await tx.workoutGroup.create({
+        data: {
+          trainerId: u.sub,
+          name: body.name.trim(),
+          description: body.description?.trim() ? body.description.trim() : null,
+          templateId: null,
+          days: {
+            create: body.schedule.map((s) => ({
+              dayOfWeek: s.dayOfWeek,
+              templateId: s.templateId,
+            })),
+          },
+        },
+      });
+
+      for (const studentId of studentIds) {
+        const sl = await tx.trainerStudentLink.findUnique({
+          where: { trainerId_studentId: { trainerId: u.sub, studentId } },
+        });
+        if (!sl) throw new ForbiddenException(`Aluna não encontrada ou sem vínculo: ${studentId}.`);
+        await tx.workoutGroupUser.create({
+          data: { groupId: g.id, studentId },
+        });
+      }
+
+      const full = await tx.workoutGroup.findFirst({
+        where: { id: g.id, trainerId: u.sub },
+        include: {
+          template: { select: { id: true, name: true } },
+          days: { include: { template: { select: { id: true, name: true } } }, orderBy: { dayOfWeek: "asc" } },
+          members: {
+            orderBy: { joinedAt: "asc" },
+            include: { student: { select: { id: true, name: true, email: true } } },
+          },
+          _count: { select: { members: true } },
+        },
+      });
+      if (!full) throw new NotFoundException("Grupo não encontrado.");
+      return full;
     });
   }
 
@@ -601,7 +702,13 @@ export class TrainerController {
   async updateWorkoutGroup(
     @CurrentUser() u: JwtUser,
     @Param("groupId") groupId: string,
-    @Body() body: { name?: string; description?: string | null; templateId?: string },
+    @Body()
+    body: {
+      name?: string;
+      description?: string | null;
+      /** Substitui o planejamento semanal inteiro (mín. 2 dias). */
+      schedule?: { dayOfWeek: number; templateId: string }[];
+    },
   ) {
     const existing = await this.prisma.workoutGroup.findFirst({
       where: { id: groupId, trainerId: u.sub },
@@ -610,33 +717,41 @@ export class TrainerController {
     if (body.name !== undefined && !body.name.trim()) {
       throw new BadRequestException("Nome do grupo não pode ser vazio.");
     }
-    if (body.templateId !== undefined) {
-      const tpl = await this.prisma.workoutTemplate.findFirst({
-        where: { id: body.templateId, trainerId: u.sub },
-      });
-      if (!tpl) throw new NotFoundException("Modelo de treino não encontrado.");
-      if (tpl.privateForStudentId) {
-        throw new BadRequestException(
-          "Fichas exclusivas de uma aluna não podem ser usadas em grupos. Use um modelo da biblioteca.",
-        );
-      }
+    if (body.schedule !== undefined) {
+      await this.validateGroupSchedule(u.sub, body.schedule);
     }
 
-    await this.prisma.workoutGroup.update({
-      where: { id: groupId },
-      data: {
-        ...(body.name !== undefined && { name: body.name.trim() }),
-        ...(body.description !== undefined && {
-          description: body.description === "" ? null : body.description,
-        }),
-        ...(body.templateId !== undefined && { templateId: body.templateId }),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      if (body.schedule !== undefined) {
+        await tx.workoutGroupDay.deleteMany({ where: { groupId } });
+        await tx.workoutGroupDay.createMany({
+          data: body.schedule.map((s) => ({
+            groupId,
+            dayOfWeek: s.dayOfWeek,
+            templateId: s.templateId,
+          })),
+        });
+        await tx.workoutGroup.update({
+          where: { id: groupId },
+          data: { templateId: null },
+        });
+      }
+      await tx.workoutGroup.update({
+        where: { id: groupId },
+        data: {
+          ...(body.name !== undefined && { name: body.name.trim() }),
+          ...(body.description !== undefined && {
+            description: body.description === "" ? null : body.description,
+          }),
+        },
+      });
     });
 
     const group = await this.prisma.workoutGroup.findFirst({
       where: { id: groupId, trainerId: u.sub },
       include: {
         template: { select: { id: true, name: true } },
+        days: { include: { template: { select: { id: true, name: true } } }, orderBy: { dayOfWeek: "asc" } },
         members: {
           orderBy: { joinedAt: "asc" },
           include: {

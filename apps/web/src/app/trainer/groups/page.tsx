@@ -7,13 +7,20 @@ import { notify } from "@/lib/notify";
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button, Card } from "@/components/ui";
+import {
+  WeekGroupSchedulePicker,
+  daysFromApiToDraft,
+  emptyWeekDraft,
+  scheduleRecordToPayload,
+} from "@/components/trainer/WeekGroupSchedulePicker";
 
 type GroupRow = {
   id: string;
   name: string;
   description: string | null;
-  templateId: string;
-  template: { id: string; name: string };
+  templateId: string | null;
+  template: { id: string; name: string } | null;
+  days: { dayOfWeek: number; templateId: string; template: { id: string; name: string } }[];
   _count: { members: number };
 };
 
@@ -21,8 +28,9 @@ type GroupDetail = {
   id: string;
   name: string;
   description: string | null;
-  templateId: string;
-  template: { id: string; name: string };
+  templateId: string | null;
+  template: { id: string; name: string } | null;
+  days: { dayOfWeek: number; templateId: string; template: { id: string; name: string } }[];
   members: {
     studentId: string;
     joinedAt: string;
@@ -89,16 +97,18 @@ export default function TrainerGroupsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
-  const [createTemplateId, setCreateTemplateId] = useState("");
+  const [createSchedule, setCreateSchedule] = useState<Record<number, string | null>>(emptyWeekDraft);
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [createPickStudent, setCreatePickStudent] = useState("");
+  const [createPendingMembers, setCreatePendingMembers] = useState<{ id: string; name: string }[]>([]);
 
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
   const [detail, setDetail] = useState<GroupDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editTemplateId, setEditTemplateId] = useState("");
+  const [editSchedule, setEditSchedule] = useState<Record<number, string | null>>(emptyWeekDraft);
   const [detailSaving, setDetailSaving] = useState(false);
   const [detailFeedback, setDetailFeedback] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [pickAddStudent, setPickAddStudent] = useState("");
@@ -129,18 +139,17 @@ export default function TrainerGroupsPage() {
       });
   }, [load]);
 
-  useEffect(() => {
-    if (!createOpen || templates.length === 0) return;
-    setCreateTemplateId((prev) => (prev && templates.some((t) => t.id === prev) ? prev : templates[0].id));
-  }, [createOpen, templates]);
-
   const refreshDetail = useCallback(async (groupId: string) => {
     try {
       const d = await api<GroupDetail>(`/trainer/workout-groups/${groupId}`);
       setDetail(d);
       setEditName(d.name);
       setEditDescription(d.description ?? "");
-      setEditTemplateId(d.templateId);
+      setEditSchedule(
+        d.days.length > 0
+          ? daysFromApiToDraft(d.days.map((x) => ({ dayOfWeek: x.dayOfWeek, templateId: x.templateId })))
+          : emptyWeekDraft(),
+      );
     } catch (e) {
       notify.apiError(e);
       setDetailFeedback({ kind: "err", text: "Não foi possível recarregar o grupo." });
@@ -159,7 +168,11 @@ export default function TrainerGroupsPage() {
           setDetail(d);
           setEditName(d.name);
           setEditDescription(d.description ?? "");
-          setEditTemplateId(d.templateId);
+          setEditSchedule(
+            d.days.length > 0
+              ? daysFromApiToDraft(d.days.map((x) => ({ dayOfWeek: x.dayOfWeek, templateId: x.templateId })))
+              : emptyWeekDraft(),
+          );
         })
         .catch((e) => {
           notify.apiError(e);
@@ -187,19 +200,51 @@ export default function TrainerGroupsPage() {
     [students, memberIds],
   );
 
+  const studentsForCreatePick = useMemo(
+    () => students.filter((r) => !createPendingMembers.some((m) => m.id === r.student.id)),
+    [students, createPendingMembers],
+  );
+
   function openCreateModal() {
     setCreateError("");
     setCreateName("");
     setCreateDescription("");
-    setCreateTemplateId(templates[0]?.id ?? "");
+    setCreateSchedule(emptyWeekDraft());
+    setCreatePickStudent("");
+    setCreatePendingMembers([]);
     setCreateOpen(true);
+  }
+
+  function addCreatePendingMember() {
+    if (!createPickStudent) return;
+    const r = students.find((x) => x.student.id === createPickStudent);
+    if (!r) return;
+    setCreatePendingMembers((prev) => [
+      ...prev,
+      { id: r.student.id, name: (r.student.name?.trim() || r.student.email) as string },
+    ]);
+    setCreatePickStudent("");
+  }
+
+  function removeCreatePendingMember(id: string) {
+    setCreatePendingMembers((prev) => prev.filter((m) => m.id !== id));
   }
 
   async function submitCreate() {
     setCreateError("");
-    if (!createName.trim() || !createTemplateId) {
-      notify.warning("Nome e modelo de treino são obrigatórios.");
-      setCreateError("Nome e modelo de treino são obrigatórios.");
+    const schedule = scheduleRecordToPayload(createSchedule);
+    if (!createName.trim()) {
+      notify.warning("Informe o nome do grupo.");
+      setCreateError("Informe o nome do grupo.");
+      return;
+    }
+    if (schedule.length < 2) {
+      notify.warning("Planeje pelo menos dois dias da semana com treino.");
+      setCreateError("Inclua pelo menos dois dias com modelo de treino.");
+      return;
+    }
+    if (!templates.length) {
+      notify.warning("Crie modelos de treino na aba Treinos antes de montar o grupo.");
       return;
     }
     setCreateSaving(true);
@@ -209,7 +254,8 @@ export default function TrainerGroupsPage() {
         body: JSON.stringify({
           name: createName.trim(),
           description: createDescription.trim() || undefined,
-          templateId: createTemplateId,
+          schedule,
+          studentIds: createPendingMembers.map((m) => m.id),
         }),
       });
       setCreateOpen(false);
@@ -230,6 +276,15 @@ export default function TrainerGroupsPage() {
       setDetailFeedback({ kind: "err", text: "O nome do grupo não pode ser vazio." });
       return;
     }
+    const schedule = scheduleRecordToPayload(editSchedule);
+    if (schedule.length < 2) {
+      setDetailFeedback({
+        kind: "err",
+        text: "Inclua pelo menos dois dias da semana com modelo de treino.",
+      });
+      notify.warning("Planeje pelo menos dois dias da semana.");
+      return;
+    }
     setDetailSaving(true);
     try {
       await api(`/trainer/workout-groups/${detailGroupId}`, {
@@ -237,7 +292,7 @@ export default function TrainerGroupsPage() {
         body: JSON.stringify({
           name: editName.trim(),
           description: editDescription.trim() === "" ? null : editDescription.trim(),
-          templateId: editTemplateId,
+          schedule,
         }),
       });
       await refreshDetail(detailGroupId);
@@ -304,14 +359,15 @@ export default function TrainerGroupsPage() {
     }
   }
 
-  const editorHref = detail ? `/trainer/workouts?t=${encodeURIComponent(detail.templateId)}` : "#";
+  const editorFirstTemplateId = detail?.days[0]?.templateId ?? detail?.templateId ?? "";
+  const editorHref = detail && editorFirstTemplateId ? `/trainer/workouts?t=${encodeURIComponent(editorFirstTemplateId)}` : "/trainer/workouts";
 
   return (
     <AppShell role="TRAINER" title="Grupos de treino">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <p className="max-w-2xl text-sm text-ink-800/75">
-          Cada grupo usa um <strong>modelo de treino</strong> compartilhado. Inclua ou remova alunas por aqui; também é
-          possível incluir pelo perfil da aluna.
+          Monte a <strong>rotina semanal do grupo</strong> (cada dia pode ter um modelo diferente). As alunas veem a
+          sugestão por dia, com liberdade para escolher outro treino. Gerencie as alunas aqui ou pelo perfil delas.
         </p>
         <Button type="button" className="shrink-0" onClick={openCreateModal}>
           Novo grupo
@@ -331,8 +387,16 @@ export default function TrainerGroupsPage() {
                   <p className="font-display font-semibold text-ink-900">{g.name}</p>
                   {g.description && <p className="mt-1 text-sm text-ink-800/70">{g.description}</p>}
                   <p className="mt-2 text-xs text-ink-800/65">
-                    Modelo: <strong>{g.template?.name}</strong> · {g._count.members}{" "}
-                    {g._count.members === 1 ? "aluna" : "alunas"}
+                    {g.days.length > 0 ? (
+                      <>
+                        Rotina: <strong>{g.days.length} dias</strong> planejados ·{" "}
+                      </>
+                    ) : (
+                      <>
+                        Legado: <strong>{g.template?.name ?? "—"}</strong> ·{" "}
+                      </>
+                    )}
+                    {g._count.members} {g._count.members === 1 ? "aluna" : "alunas"}
                   </p>
                 </div>
                 <Button type="button" variant="outline" className="shrink-0" onClick={() => openDetail(g.id)}>
@@ -357,69 +421,140 @@ export default function TrainerGroupsPage() {
             }
           }}
         >
-          <Card className="w-full max-w-md rounded-2xl p-5 shadow-xl">
-            <h2 id="create-group-title" className="font-display text-lg font-bold text-ink-900">
-              Novo grupo
-            </h2>
-            <p className="mt-1 text-sm text-ink-800/75">Defina nome, descrição opcional e o modelo de treino do grupo.</p>
-            {createError && (
-              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
-                {createError}
-              </p>
-            )}
-            <label className="mt-4 block text-sm">
-              <span className="text-ink-800/70">Nome</span>
-              <input
-                className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
-                value={createName}
-                onChange={(e) => {
-                  setCreateName(e.target.value);
-                  if (createError) setCreateError("");
-                }}
-              />
-            </label>
-            <label className="mt-3 block text-sm">
-              <span className="text-ink-800/70">Descrição (opcional)</span>
-              <input
-                className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
-                value={createDescription}
-                onChange={(e) => setCreateDescription(e.target.value)}
-              />
-            </label>
-            <label className="mt-3 block text-sm">
-              <span className="text-ink-800/70">Modelo de treino</span>
-              <select
-                className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
-                value={createTemplateId}
-                onChange={(e) => setCreateTemplateId(e.target.value)}
-                disabled={!templates.length}
-              >
-                {templates.length === 0 ? (
-                  <option value="">Crie um modelo na aba Treinos</option>
-                ) : (
-                  templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button
+          <Card className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl p-5 shadow-xl sm:max-w-2xl">
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-brand-100 pb-3">
+              <h2 id="create-group-title" className="font-display text-lg font-bold text-ink-900">
+                Novo grupo
+              </h2>
+              <button
                 type="button"
-                variant="ghost"
-                disabled={createSaving}
+                className="rounded-lg px-2 py-1 text-sm text-ink-800/70 hover:bg-brand-50 hover:text-ink-900"
                 onClick={() => {
                   setCreateOpen(false);
                   setCreateError("");
                 }}
               >
-                Cancelar
-              </Button>
-              <Button type="button" disabled={createSaving || !templates.length} onClick={() => void submitCreate()}>
-                {createSaving ? "Criando…" : "Criar grupo"}
-              </Button>
+                Fechar
+              </button>
+            </div>
+
+            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+              <p className="text-sm text-ink-800/75">
+                Nome, descrição opcional, <strong>rotina semanal</strong> (mín. 2 dias) e, se quiser, alunas já no grupo.
+              </p>
+              {createError && (
+                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+                  {createError}
+                </p>
+              )}
+
+              <section className="mt-4 space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-800">Informações</h3>
+                <label className="block text-sm">
+                  <span className="text-ink-800/70">Nome</span>
+                  <input
+                    className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
+                    value={createName}
+                    onChange={(e) => {
+                      setCreateName(e.target.value);
+                      if (createError) setCreateError("");
+                    }}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-ink-800/70">Descrição (opcional)</span>
+                  <input
+                    className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
+                    value={createDescription}
+                    onChange={(e) => setCreateDescription(e.target.value)}
+                  />
+                </label>
+              </section>
+
+              <section className="mt-6">
+                <span className="text-sm font-medium text-ink-800/80">Rotina semanal do grupo</span>
+                <div className="mt-2">
+                  <WeekGroupSchedulePicker
+                    draft={createSchedule}
+                    onChange={setCreateSchedule}
+                    templates={templates}
+                    disabled={!templates.length}
+                  />
+                </div>
+              </section>
+
+              <section className="mt-6 border-t border-brand-100 pt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-800">Alunas no grupo</h3>
+                <p className="mt-1 text-xs text-ink-800/60">Opcional — podem ser adicionadas depois.</p>
+                {createPendingMembers.length > 0 && (
+                  <ul className="mt-3 space-y-2">
+                    {createPendingMembers.map((m) => (
+                      <li
+                        key={m.id}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-brand-100 bg-brand-50/50 px-3 py-2 text-sm"
+                      >
+                        <span className="font-medium text-ink-900">{m.name}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="shrink-0 text-xs text-red-700 hover:bg-red-50"
+                          onClick={() => removeCreatePendingMember(m.id)}
+                        >
+                          Remover
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {studentsForCreatePick.length > 0 ? (
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <label className="block flex-1 text-sm">
+                      <span className="text-ink-800/70">Incluir aluna</span>
+                      <select
+                        className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
+                        value={createPickStudent}
+                        onChange={(e) => setCreatePickStudent(e.target.value)}
+                      >
+                        <option value="">Escolha uma aluna…</option>
+                        {studentsForCreatePick.map((r) => (
+                          <option key={r.student.id} value={r.student.id}>
+                            {r.student.name?.trim() || r.student.email}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!createPickStudent}
+                      onClick={addCreatePendingMember}
+                    >
+                      Adicionar
+                    </Button>
+                  </div>
+                ) : students.length === 0 ? (
+                  <p className="mt-3 text-xs text-ink-800/60">Você ainda não tem alunas vinculadas.</p>
+                ) : createPendingMembers.length > 0 ? (
+                  <p className="mt-3 text-xs text-ink-800/60">Todas as alunas já foram incluídas na lista.</p>
+                ) : null}
+              </section>
+
+              <div className="mt-8 flex flex-col gap-2 border-t border-brand-100 pt-4 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={createSaving}
+                  onClick={() => {
+                    setCreateOpen(false);
+                    setCreateError("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button type="button" disabled={createSaving || !templates.length} onClick={() => void submitCreate()}>
+                  {createSaving ? "Criando…" : "Criar grupo"}
+                </Button>
+              </div>
             </div>
           </Card>
         </div>
@@ -435,7 +570,7 @@ export default function TrainerGroupsPage() {
             if (e.target === e.currentTarget) closeDetail();
           }}
         >
-          <Card className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl p-5 shadow-xl sm:max-w-xl">
+          <Card className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl p-5 shadow-xl sm:max-w-2xl">
             <div className="flex shrink-0 items-start justify-between gap-2 border-b border-brand-100 pb-3">
               <h2 id="detail-group-title" className="font-display text-lg font-bold text-ink-900">
                 Grupo de treino
@@ -487,21 +622,36 @@ export default function TrainerGroupsPage() {
                         onChange={(e) => setEditDescription(e.target.value)}
                       />
                     </label>
-                    <label className="block text-sm">
-                      <span className="text-ink-800/70">Modelo de treino</span>
-                      <select
-                        className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
-                        value={editTemplateId}
-                        onChange={(e) => setEditTemplateId(e.target.value)}
-                        disabled={!templates.length}
-                      >
-                        {templates.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {detail.days.length === 0 && detail.templateId && (
+                      <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                        <p>
+                          Este grupo ainda usa um <strong>único modelo (legado)</strong>. Monte abaixo a rotina semanal
+                          (mín. 2 dias) e salve — o app orienta a aluna por dia da semana.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-amber-300 text-xs text-amber-950"
+                          onClick={() => {
+                            const id = detail.templateId!;
+                            setEditSchedule({ ...emptyWeekDraft(), 1: id, 3: id });
+                          }}
+                        >
+                          Preencher seg. e qua. com o modelo atual
+                        </Button>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-sm font-medium text-ink-800/80">Rotina semanal do grupo</span>
+                      <div className="mt-2">
+                        <WeekGroupSchedulePicker
+                          draft={editSchedule}
+                          onChange={setEditSchedule}
+                          templates={templates}
+                          disabled={!templates.length}
+                        />
+                      </div>
+                    </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                       <Button type="button" disabled={detailSaving} onClick={() => void saveGroupInfo()}>
                         {detailSaving ? "Salvando…" : "Salvar alterações"}
@@ -598,7 +748,7 @@ export default function TrainerGroupsPage() {
                       Excluir grupo
                     </Button>
                     <p className="mt-2 text-xs text-ink-800/55">
-                      As alunas saem do grupo e o grupo some da lista. O modelo de treino continua na aba Treinos.
+                      As alunas saem do grupo e o grupo some da lista. Os modelos de treino continuam na aba Treinos.
                     </p>
                   </section>
                 </>

@@ -258,6 +258,7 @@ model WorkoutTemplate {
 
   days    WorkoutDay[]
   groups  WorkoutGroup[]
+  groupDayAssignments WorkoutGroupDay[]
   overrides UserWorkoutOverride[]
   studentSlots StudentWorkoutSlot[]
   completions WorkoutCompletion[]
@@ -316,12 +317,27 @@ model WorkoutGroup {
   trainerId   String @map("trainer_id")
   name        String
   description String? @db.Text
-  templateId  String @map("template_id")
+  /// Legado: um único modelo para o grupo (usado se não houver linhas em `days`).
+  templateId  String? @map("template_id")
 
-  trainer  User              @relation(fields: [trainerId], references: [id], onDelete: Cascade)
-  template WorkoutTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  trainer  User               @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  template WorkoutTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
   members  WorkoutGroupUser[]
   events   GroupEvent[]
+  days     WorkoutGroupDay[]
+}
+
+/// Planejamento semanal do grupo: dia da semana (0=domingo … 6=sábado) → modelo (1 treino = 1 dia).
+model WorkoutGroupDay {
+  groupId    String @map("group_id")
+  dayOfWeek  Int    @map("day_of_week")
+  templateId String @map("template_id")
+
+  group    WorkoutGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  template WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, dayOfWeek])
+  @@map("workout_group_days")
 }
 
 model GroupEvent {

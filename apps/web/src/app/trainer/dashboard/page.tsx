@@ -46,7 +46,8 @@ type DashboardPayload = {
     id: string;
     name: string;
     _count: { members: number };
-    template: { name: string };
+    template: { name: string } | null;
+    days?: { dayOfWeek: number }[];
   }[];
 };
 
@@ -627,7 +628,10 @@ export default function TrainerDashboardPage() {
                         >
                           <span className="font-medium text-ink-900">{g.name}</span>
                           <span className="mt-0.5 block text-xs text-ink-800/65">
-                            {g._count.members} alunas · {g.template.name}
+                            {g._count.members} alunas ·{" "}
+                            {g.days && g.days.length > 0
+                              ? `Rotina ${g.days.length} dias`
+                              : (g.template?.name ?? "Grupo")}
                           </span>
                         </Link>
                       </li>
