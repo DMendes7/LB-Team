@@ -16,6 +16,7 @@ type ExerciseFull = {
   name: string;
   videoUrl: string | null;
   videoFileKey: string | null;
+  videoOriginalName: string | null;
   imageUrl: string | null;
   instructions: string | null;
 };
@@ -343,6 +344,7 @@ export default function WorkoutRunWithTemplatePage() {
                             title={row.exercise.name}
                             videoUrl={row.exercise.videoUrl}
                             videoFileKey={row.exercise.videoFileKey}
+                            videoOriginalName={row.exercise.videoOriginalName}
                             posterUrl={row.exercise.imageUrl}
                           />
                         </div>

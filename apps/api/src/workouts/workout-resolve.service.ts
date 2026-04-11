@@ -109,19 +109,24 @@ export class WorkoutResolveService {
     return false;
   }
 
+  /** Sempre o primeiro dia do modelo (sem rodízio por dia da semana). */
   async getTodayDayIndex(templateId: string): Promise<number> {
+    const first = await this.prisma.workoutDay.findFirst({
+      where: { templateId },
+      orderBy: { dayIndex: "asc" },
+      select: { dayIndex: true },
+    });
+    return first?.dayIndex ?? 0;
+  }
+
+  /**
+   * Junta todos os dias do modelo numa única lista de exercícios (ordem: dia 0, dia 1, …).
+   * Assim a aluna vê o treino completo; o cadastro do personal passou a ser um único dia no editor.
+   */
+  async loadWorkoutDay(templateId: string, _dayIndex: number) {
     const days = await this.prisma.workoutDay.findMany({
       where: { templateId },
       orderBy: { dayIndex: "asc" },
-    });
-    if (!days.length) return 0;
-    const dow = new Date().getDay();
-    return days[dow % days.length]?.dayIndex ?? days[0].dayIndex;
-  }
-
-  async loadWorkoutDay(templateId: string, dayIndex: number) {
-    return this.prisma.workoutDay.findFirst({
-      where: { templateId, dayIndex },
       include: {
         exercises: {
           orderBy: { orderIndex: "asc" },
@@ -135,5 +140,23 @@ export class WorkoutResolveService {
         },
       },
     });
+    if (days.length === 0) return null;
+    const mergedRows = days.flatMap((d) => d.exercises);
+    const exercises = mergedRows.map((row, orderIndex) => ({
+      ...row,
+      orderIndex,
+    }));
+    const first = days[0];
+    const name =
+      days.length === 1
+        ? first.name
+        : [first.name, ...days.slice(1).map((d) => d.name)].filter(Boolean).join(" · ") || "Treino";
+    return {
+      id: first.id,
+      templateId: first.templateId,
+      dayIndex: first.dayIndex,
+      name,
+      exercises,
+    };
   }
 }

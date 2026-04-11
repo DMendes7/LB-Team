@@ -27,7 +27,6 @@ const nav: Record<Role, { href: string; label: string }[]> = {
     { href: "/trainer/workouts", label: "Treinos" },
     { href: "/trainer/groups", label: "Grupos" },
     { href: "/trainer/events", label: "Eventos" },
-    { href: "/trainer/reports", label: "Relatórios" },
   ],
   NUTRITIONIST: [
     { href: "/nutritionist/dashboard", label: "Painel" },

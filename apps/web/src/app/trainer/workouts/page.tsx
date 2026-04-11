@@ -30,12 +30,6 @@ type ExerciseDraft = {
   blocks: BlockDraft[];
 };
 
-type WorkoutDayDraft = {
-  dayIndex: number;
-  name: string;
-  exercises: ExerciseDraft[];
-};
-
 type TemplateExercise = {
   orderIndex: number;
   sets: number;
@@ -91,31 +85,37 @@ function parseBlocksFromApi(e: TemplateExercise): BlockDraft[] {
   ];
 }
 
-function templateToDraft(t: TemplateFull): WorkoutDayDraft[] {
-  return (t.days ?? [])
-    .slice()
-    .sort((a, b) => a.dayIndex - b.dayIndex)
-    .map((d) => ({
-      dayIndex: d.dayIndex,
-      name: d.name,
-      exercises: (d.exercises ?? [])
-        .slice()
-        .sort((a, b) => a.orderIndex - b.orderIndex)
-        .map((e) => {
-          const blocks = parseBlocksFromApi(e);
-          const first = blocks[0];
-          return {
-            exerciseId: e.exerciseId,
-            orderIndex: e.orderIndex,
-            sets: first?.sets ?? e.sets,
-            reps: first?.reps ?? e.reps,
-            restSec: first?.restSec ?? e.restSec,
-            cadence: e.cadence ?? "",
-            notes: e.notes ?? "",
-            blocks: blocks.length ? blocks : [{ instructions: "", sets: 3, reps: "12", weightKg: 0, restSec: 60 }],
-          };
-        }),
-    }));
+function exerciseDraftFromTemplate(e: TemplateExercise): ExerciseDraft {
+  const blocks = parseBlocksFromApi(e);
+  const first = blocks[0];
+  return {
+    exerciseId: e.exerciseId,
+    orderIndex: e.orderIndex,
+    sets: first?.sets ?? e.sets,
+    reps: first?.reps ?? e.reps,
+    restSec: first?.restSec ?? e.restSec,
+    cadence: e.cadence ?? "",
+    notes: e.notes ?? "",
+    blocks: blocks.length ? blocks : [{ instructions: "", sets: 3, reps: "12", weightKg: 0, restSec: 60 }],
+  };
+}
+
+/** Modelos antigos com vários dias viram uma lista única (ordem dos dias preservada). */
+function templateToExercises(t: TemplateFull): ExerciseDraft[] {
+  const sortedDays = (t.days ?? []).slice().sort((a, b) => a.dayIndex - b.dayIndex);
+  const out: ExerciseDraft[] = [];
+  for (const d of sortedDays) {
+    const exs = (d.exercises ?? []).slice().sort((a, b) => a.orderIndex - b.orderIndex);
+    for (const e of exs) {
+      out.push(exerciseDraftFromTemplate(e));
+    }
+  }
+  return out;
+}
+
+function normalizeBlocksForSave(blocks: BlockDraft[]): BlockDraft[] {
+  if (blocks.length > 0) return blocks;
+  return [{ instructions: "", sets: 3, reps: "12", weightKg: 0, restSec: 60 }];
 }
 
 export default function TrainerWorkoutsPage() {
@@ -136,10 +136,16 @@ function TrainerWorkoutsPageInner() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [days, setDays] = useState<WorkoutDayDraft[]>([]);
+  const [exercises, setExercises] = useState<ExerciseDraft[]>([]);
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState(false);
   const [libraryLoaded, setLibraryLoaded] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateDescription, setNewTemplateDescription] = useState("");
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   const loadTemplates = useCallback((): Promise<void> => {
     return api<TemplateFull[]>("/trainer/workout-templates")
@@ -165,7 +171,7 @@ function TrainerWorkoutsPageInner() {
     setSelectedId(t.id);
     setName(t.name);
     setDescription(t.description ?? "");
-    setDays(templateToDraft(t));
+    setExercises(templateToExercises(t));
   }, []);
 
   const tParam = searchParams.get("t");
@@ -175,7 +181,7 @@ function TrainerWorkoutsPageInner() {
     prevTParamForClearRef.current = tParam;
     if (hadT && !tParam) {
       setSelectedId(null);
-      setDays([]);
+      setExercises([]);
       setName("");
       setDescription("");
     }
@@ -209,57 +215,76 @@ function TrainerWorkoutsPageInner() {
     router.replace(pathname);
   }, [searchParams, pathname, router]);
 
-  async function createNew() {
+  function openCreateModal() {
+    setCreateError("");
+    setNewTemplateName("");
+    setNewTemplateDescription("");
+    setCreateModalOpen(true);
+  }
+
+  async function submitCreateModal() {
+    setCreateError("");
+    const n = newTemplateName.trim();
+    if (!n) {
+      const msg = "Informe o nome do treino.";
+      notify.warning(msg);
+      setCreateError(msg);
+      return;
+    }
+    setCreateSubmitting(true);
     try {
       const t = await api<TemplateFull>("/trainer/workout-templates", {
         method: "POST",
         body: JSON.stringify({
-          name: "Novo treino",
-          description: "",
-          days: [{ dayIndex: 0, name: "Dia 1", exercises: [] }],
+          name: n,
+          description: newTemplateDescription.trim() || undefined,
+          days: [{ dayIndex: 0, name: "Treino", exercises: [] }],
         }),
       });
-      notify.success("Modelo criado.");
-      loadTemplates();
+      setCreateModalOpen(false);
+      await loadTemplates();
       selectTemplate(t);
+      notify.success("Modelo criado.");
     } catch (e) {
       notify.apiError(e);
+      setCreateError(e instanceof Error ? e.message : "Erro ao criar o modelo.");
+    } finally {
+      setCreateSubmitting(false);
     }
   }
 
   async function save() {
     if (!selectedId) return;
-    if (!days.length) {
-      notify.warning("Adicione pelo menos um dia ao treino antes de salvar.");
-      return;
-    }
     setSaveBusy(true);
     const body = {
       name: name.trim() || "Treino",
       description: description.trim() || null,
-      days: days.map((d) => ({
-        dayIndex: d.dayIndex,
-        name: d.name.trim() || `Dia ${d.dayIndex + 1}`,
-        exercises: d.exercises.map((e, i) => {
-          const first = e.blocks[0];
-          return {
-            exerciseId: e.exerciseId,
-            orderIndex: i,
-            sets: first?.sets ?? e.sets,
-            reps: first?.reps ?? e.reps,
-            restSec: first?.restSec ?? e.restSec,
-            cadence: e.cadence.trim() || undefined,
-            notes: e.notes.trim() || undefined,
-            prescriptionBlocks: e.blocks.map((b) => ({
-              instructions: b.instructions.trim() || undefined,
-              sets: b.sets,
-              reps: b.reps,
-              weightKg: b.weightKg,
-              restSec: b.restSec,
-            })),
-          };
-        }),
-      })),
+      days: [
+        {
+          dayIndex: 0,
+          name: "Treino",
+          exercises: exercises.map((e, i) => {
+            const blocks = normalizeBlocksForSave(e.blocks);
+            const first = blocks[0];
+            return {
+              exerciseId: e.exerciseId,
+              orderIndex: i,
+              sets: first?.sets ?? e.sets,
+              reps: first?.reps ?? e.reps,
+              restSec: first?.restSec ?? e.restSec,
+              cadence: e.cadence.trim() || undefined,
+              notes: e.notes.trim() || undefined,
+              prescriptionBlocks: blocks.map((b) => ({
+                instructions: b.instructions.trim() || undefined,
+                sets: b.sets,
+                reps: b.reps,
+                weightKg: b.weightKg,
+                restSec: b.restSec,
+              })),
+            };
+          }),
+        },
+      ],
     };
     try {
       await api(`/trainer/workout-templates/${selectedId}`, {
@@ -285,7 +310,7 @@ function TrainerWorkoutsPageInner() {
       await api(`/trainer/workout-templates/${selectedId}`, { method: "DELETE" });
       setConfirmDeleteTemplate(false);
       setSelectedId(null);
-      setDays([]);
+      setExercises([]);
       notify.success("Modelo excluído.");
       loadTemplates();
     } catch (e) {
@@ -293,104 +318,67 @@ function TrainerWorkoutsPageInner() {
     }
   }
 
-  function addDay() {
-    const next = days.length ? Math.max(...days.map((d) => d.dayIndex)) + 1 : 0;
-    setDays([...days, { dayIndex: next, name: `Dia ${next + 1}`, exercises: [] }]);
-  }
-
-  function removeDay(dayIndex: number) {
-    setDays(days.filter((d) => d.dayIndex !== dayIndex));
-  }
-
-  function addExercise(dayIndex: number, exerciseId: string) {
+  function addExercise(exerciseId: string) {
     if (!exerciseId) return;
-    setDays(
-      days.map((d) => {
-        if (d.dayIndex !== dayIndex) return d;
-        const nextOrder = d.exercises.length;
-        return {
-          ...d,
-          exercises: [
-            ...d.exercises,
-            {
-              exerciseId,
-              orderIndex: nextOrder,
-              sets: 3,
-              reps: "12",
-              restSec: 60,
-              cadence: "",
-              notes: "",
-              blocks: [{ instructions: "", sets: 3, reps: "6 a 8", weightKg: 0, restSec: 120 }],
-            },
-          ],
-        };
-      }),
-    );
+    setExercises((prev) => [
+      ...prev,
+      {
+        exerciseId,
+        orderIndex: prev.length,
+        sets: 3,
+        reps: "12",
+        restSec: 60,
+        cadence: "",
+        notes: "",
+        blocks: [{ instructions: "", sets: 3, reps: "6 a 8", weightKg: 0, restSec: 120 }],
+      },
+    ]);
   }
 
-  function updateEx(dayIndex: number, idx: number, patch: Partial<ExerciseDraft>) {
-    setDays(
-      days.map((d) => {
-        if (d.dayIndex !== dayIndex) return d;
-        const ex = [...d.exercises];
-        ex[idx] = { ...ex[idx], ...patch };
-        return { ...d, exercises: ex };
-      }),
-    );
+  function updateEx(idx: number, patch: Partial<ExerciseDraft>) {
+    setExercises((prev) => {
+      const ex = [...prev];
+      ex[idx] = { ...ex[idx], ...patch };
+      return ex;
+    });
   }
 
-  function updateBlock(dayIndex: number, exIdx: number, blockIdx: number, patch: Partial<BlockDraft>) {
-    setDays(
-      days.map((d) => {
-        if (d.dayIndex !== dayIndex) return d;
-        const ex = [...d.exercises];
-        const blocks = [...ex[exIdx].blocks];
-        blocks[blockIdx] = { ...blocks[blockIdx], ...patch };
-        ex[exIdx] = { ...ex[exIdx], blocks };
-        return { ...d, exercises: ex };
-      }),
-    );
+  function updateBlock(exIdx: number, blockIdx: number, patch: Partial<BlockDraft>) {
+    setExercises((prev) => {
+      const ex = [...prev];
+      const blocks = [...ex[exIdx].blocks];
+      blocks[blockIdx] = { ...blocks[blockIdx], ...patch };
+      ex[exIdx] = { ...ex[exIdx], blocks };
+      return ex;
+    });
   }
 
-  function addBlock(dayIndex: number, exIdx: number) {
-    setDays(
-      days.map((d) => {
-        if (d.dayIndex !== dayIndex) return d;
-        const ex = [...d.exercises];
-        ex[exIdx] = {
-          ...ex[exIdx],
-          blocks: [
-            ...ex[exIdx].blocks,
-            { instructions: "", sets: 2, reps: "8 a 10", weightKg: 0, restSec: 120 },
-          ],
-        };
-        return { ...d, exercises: ex };
-      }),
-    );
+  function addBlock(exIdx: number) {
+    setExercises((prev) => {
+      const ex = [...prev];
+      ex[exIdx] = {
+        ...ex[exIdx],
+        blocks: [...ex[exIdx].blocks, { instructions: "", sets: 2, reps: "8 a 10", weightKg: 0, restSec: 120 }],
+      };
+      return ex;
+    });
   }
 
-  function removeBlock(dayIndex: number, exIdx: number, blockIdx: number) {
-    setDays(
-      days.map((d) => {
-        if (d.dayIndex !== dayIndex) return d;
-        const ex = [...d.exercises];
-        if (ex[exIdx].blocks.length <= 1) return d;
-        ex[exIdx] = {
-          ...ex[exIdx],
-          blocks: ex[exIdx].blocks.filter((_, i) => i !== blockIdx),
-        };
-        return { ...d, exercises: ex };
-      }),
-    );
+  function removeBlock(exIdx: number, blockIdx: number) {
+    setExercises((prev) => {
+      const blocks = prev[exIdx]?.blocks ?? [];
+      if (blocks.length <= 1 || blockIdx <= 0) return prev;
+      const ex = [...prev];
+      ex[exIdx] = {
+        ...ex[exIdx],
+        blocks: blocks.filter((_, i) => i !== blockIdx),
+      };
+      return ex;
+    });
   }
 
-  function removeEx(dayIndex: number, idx: number) {
-    setDays(
-      days.map((d) => {
-        if (d.dayIndex !== dayIndex) return d;
-        return { ...d, exercises: d.exercises.filter((_, i) => i !== idx) };
-      }),
-    );
+  function removeEx(idx: number) {
+    setExercises((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function exerciseLabel(id: string) {
@@ -412,14 +400,82 @@ function TrainerWorkoutsPageInner() {
         <strong>Editar ficha</strong>.
       </p>
       <p className="mb-4 text-sm text-ink-800/75">
-        Defina <strong>cadência</strong> e <strong>blocos</strong> (ex.: 3×6–8 e depois 2×8–10) como na ficha. O vídeo continua no{" "}
-        <strong>exercício</strong> do banco — a aluna vê ao lado na ficha.
+        Monte <strong>um treino</strong> com a lista de exercícios, <strong>cadência</strong> e <strong>blocos de séries</strong>. O vídeo de execução vem do{" "}
+        <strong>banco de exercícios</strong> — a aluna vê ao lado na ficha.
       </p>
       <div className="mb-6 flex flex-wrap gap-2">
-        <Button type="button" onClick={createNew}>
+        <Button type="button" onClick={openCreateModal}>
           Novo treino
         </Button>
       </div>
+
+      {createModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-ink-900/40 p-3 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-workout-template-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setCreateModalOpen(false);
+              setCreateError("");
+            }
+          }}
+        >
+          <Card className="w-full max-w-md rounded-2xl p-5 shadow-xl">
+            <h2 id="create-workout-template-title" className="font-display text-lg font-bold text-ink-900">
+              Novo modelo de treino
+            </h2>
+            <p className="mt-1 text-sm text-ink-800/75">
+              Defina nome e descrição. Depois adicione os exercícios no editor ao lado.
+            </p>
+            {createError && (
+              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+                {createError}
+              </p>
+            )}
+            <label className="mt-4 block text-sm">
+              <span className="text-ink-800/70">Nome do treino</span>
+              <input
+                className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
+                value={newTemplateName}
+                onChange={(e) => {
+                  setNewTemplateName(e.target.value);
+                  if (createError) setCreateError("");
+                }}
+                placeholder="Ex.: Upper A — foco peito"
+                autoFocus
+              />
+            </label>
+            <label className="mt-3 block text-sm">
+              <span className="text-ink-800/70">Descrição (opcional)</span>
+              <textarea
+                className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
+                rows={3}
+                value={newTemplateDescription}
+                onChange={(e) => setNewTemplateDescription(e.target.value)}
+                placeholder="Notas para você ou para a aluna ver na ficha."
+              />
+            </label>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={createSubmitting}
+                onClick={() => {
+                  setCreateModalOpen(false);
+                  setCreateError("");
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="button" disabled={createSubmitting} onClick={() => void submitCreateModal()}>
+                {createSubmitting ? "Salvando…" : "Salvar treino"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
         <Card className="h-fit">
@@ -458,7 +514,7 @@ function TrainerWorkoutsPageInner() {
           {selectedId ? (
             <Card>
               <div className="flex flex-wrap items-end gap-3">
-                <label className="flex-1 min-w-[200px] text-sm">
+                <label className="min-w-[200px] flex-1 text-sm">
                   <span className="text-ink-800/70">Nome do treino</span>
                   <input
                     className="mt-1 w-full rounded-xl border border-brand-200 px-3 py-2 text-sm"
@@ -480,160 +536,131 @@ function TrainerWorkoutsPageInner() {
                 />
               </label>
 
-              <div className="mt-4 space-y-4">
-                {days
-                  .slice()
-                  .sort((a, b) => a.dayIndex - b.dayIndex)
-                  .map((d) => (
-                    <div key={d.dayIndex} className="rounded-xl border border-brand-100 bg-brand-50/40 p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          className="rounded-lg border border-brand-200 px-2 py-1 text-sm font-medium"
-                          value={d.name}
-                          onChange={(e) =>
-                            setDays(
-                              days.map((x) => (x.dayIndex === d.dayIndex ? { ...x, name: e.target.value } : x)),
-                            )
-                          }
-                        />
-                        <Button type="button" variant="ghost" onClick={() => removeDay(d.dayIndex)}>
-                          Remover dia
-                        </Button>
-                      </div>
-                      <div className="mt-3 space-y-4">
-                        {d.exercises.map((ex, idx) => (
-                          <div
-                            key={`${d.dayIndex}-${idx}`}
-                            className="space-y-3 rounded-xl border border-brand-200 bg-white/90 p-4 text-sm"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="font-semibold text-ink-900">{exerciseLabel(ex.exerciseId)}</span>
-                              <Button type="button" variant="outline" onClick={() => removeEx(d.dayIndex, idx)}>
-                                Remover exercício
-                              </Button>
-                            </div>
-                            <label className="block">
-                              <span className="text-ink-800/70">Cadência (execução)</span>
-                              <input
-                                className="mt-1 w-full rounded-lg border border-brand-200 px-2 py-1.5 text-sm"
-                                placeholder="Ex.: 2 segundos em cada fase do movimento"
-                                value={ex.cadence}
-                                onChange={(e) => updateEx(d.dayIndex, idx, { cadence: e.target.value })}
-                              />
-                            </label>
-                            <label className="block">
-                              <span className="text-ink-800/70">Notas gerais do exercício na ficha (opcional)</span>
-                              <textarea
-                                className="mt-1 w-full rounded-lg border border-brand-200 px-2 py-1.5 text-sm"
-                                rows={2}
-                                value={ex.notes}
-                                onChange={(e) => updateEx(d.dayIndex, idx, { notes: e.target.value })}
-                              />
-                            </label>
-                            <p className="text-xs font-semibold text-brand-800">Blocos de séries</p>
-                            {ex.blocks.map((b, bi) => (
-                              <div
-                                key={bi}
-                                className="grid gap-2 rounded-lg border border-brand-100 bg-brand-50/60 p-3 sm:grid-cols-2 lg:grid-cols-3"
-                              >
-                                <label className="sm:col-span-2 lg:col-span-3">
-                                  <span className="text-xs text-ink-800/70">Instruções deste bloco</span>
-                                  <textarea
-                                    className="mt-1 w-full rounded border border-brand-200 px-2 py-1 text-sm"
-                                    rows={2}
-                                    value={b.instructions}
-                                    onChange={(e) => updateBlock(d.dayIndex, idx, bi, { instructions: e.target.value })}
-                                  />
-                                </label>
-                                <label>
-                                  Séries
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
-                                    value={b.sets}
-                                    onChange={(e) =>
-                                      updateBlock(d.dayIndex, idx, bi, { sets: Number(e.target.value) || 1 })
-                                    }
-                                  />
-                                </label>
-                                <label>
-                                  Reps
-                                  <input
-                                    className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
-                                    value={b.reps}
-                                    onChange={(e) => updateBlock(d.dayIndex, idx, bi, { reps: e.target.value })}
-                                  />
-                                </label>
-                                <label>
-                                  Carga (kg)
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step={0.5}
-                                    className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
-                                    value={b.weightKg}
-                                    onChange={(e) =>
-                                      updateBlock(d.dayIndex, idx, bi, { weightKg: Number(e.target.value) || 0 })
-                                    }
-                                  />
-                                </label>
-                                <label>
-                                  Descanso (s)
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
-                                    value={b.restSec}
-                                    onChange={(e) =>
-                                      updateBlock(d.dayIndex, idx, bi, { restSec: Number(e.target.value) || 0 })
-                                    }
-                                  />
-                                </label>
-                                <div className="flex items-end">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() => removeBlock(d.dayIndex, idx, bi)}
-                                    disabled={ex.blocks.length <= 1}
-                                  >
-                                    Remover bloco
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                            <Button type="button" variant="outline" onClick={() => addBlock(d.dayIndex, idx)}>
-                              + Bloco de séries
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <select
-                          className="rounded-lg border border-brand-200 px-2 py-1 text-sm"
-                          defaultValue=""
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            e.target.value = "";
-                            addExercise(d.dayIndex, v);
-                          }}
-                        >
-                          <option value="">+ Adicionar exercício…</option>
-                          {catalog.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-brand-800">Exercícios</p>
+              <div className="mt-2 space-y-4 rounded-xl border border-brand-100 bg-brand-50/40 p-4">
+                {exercises.map((ex, idx) => (
+                  <div key={`ex-${idx}-${ex.exerciseId}`} className="space-y-3 rounded-xl border border-brand-200 bg-white/90 p-4 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-ink-900">{exerciseLabel(ex.exerciseId)}</span>
+                      <Button type="button" variant="outline" onClick={() => removeEx(idx)}>
+                        Remover exercício
+                      </Button>
                     </div>
-                  ))}
+                    <label className="block">
+                      <span className="text-ink-800/70">Cadência (execução)</span>
+                      <input
+                        className="mt-1 w-full rounded-lg border border-brand-200 px-2 py-1.5 text-sm"
+                        placeholder="Ex.: 2 segundos em cada fase do movimento"
+                        value={ex.cadence}
+                        onChange={(e) => updateEx(idx, { cadence: e.target.value })}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-ink-800/70">Notas gerais do exercício na ficha (opcional)</span>
+                      <textarea
+                        className="mt-1 w-full rounded-lg border border-brand-200 px-2 py-1.5 text-sm"
+                        rows={2}
+                        value={ex.notes}
+                        onChange={(e) => updateEx(idx, { notes: e.target.value })}
+                      />
+                    </label>
+                    <p className="text-xs font-semibold text-brand-800">Blocos de séries</p>
+                    {ex.blocks.map((b, bi) => (
+                      <div
+                        key={bi}
+                        className="rounded-lg border border-brand-100 bg-brand-50/60 p-3"
+                      >
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-brand-100/90 pb-2">
+                          <span className="text-xs font-semibold text-ink-800">Bloco {bi + 1}</span>
+                          {ex.blocks.length > 1 && bi > 0 ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="shrink-0 border-red-200 px-3 py-1.5 text-xs font-medium text-red-800 hover:border-red-300 hover:bg-red-50"
+                              onClick={() => removeBlock(idx, bi)}
+                            >
+                              Remover bloco
+                            </Button>
+                          ) : null}
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          <label className="sm:col-span-2 lg:col-span-3">
+                            <span className="text-xs text-ink-800/70">Instruções deste bloco</span>
+                            <textarea
+                              className="mt-1 w-full rounded border border-brand-200 px-2 py-1 text-sm"
+                              rows={2}
+                              value={b.instructions}
+                              onChange={(e) => updateBlock(idx, bi, { instructions: e.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Séries
+                            <input
+                              type="number"
+                              min={1}
+                              className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
+                              value={b.sets}
+                              onChange={(e) => updateBlock(idx, bi, { sets: Number(e.target.value) || 1 })}
+                            />
+                          </label>
+                          <label>
+                            Reps
+                            <input
+                              className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
+                              value={b.reps}
+                              onChange={(e) => updateBlock(idx, bi, { reps: e.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Carga (kg)
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
+                              value={b.weightKg}
+                              onChange={(e) => updateBlock(idx, bi, { weightKg: Number(e.target.value) || 0 })}
+                            />
+                          </label>
+                          <label>
+                            Descanso (s)
+                            <input
+                              type="number"
+                              min={0}
+                              className="mt-1 w-full rounded border border-brand-200 px-2 py-1"
+                              value={b.restSec}
+                              onChange={(e) => updateBlock(idx, bi, { restSec: Number(e.target.value) || 0 })}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                    <Button type="button" variant="outline" onClick={() => addBlock(idx)}>
+                      + Bloco de séries
+                    </Button>
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <select
+                    className="rounded-lg border border-brand-200 px-2 py-1 text-sm"
+                    defaultValue=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      e.target.value = "";
+                      addExercise(v);
+                    }}
+                  >
+                    <option value="">+ Adicionar exercício…</option>
+                    {catalog.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={addDay}>
-                  Adicionar dia
-                </Button>
                 <Button type="button" disabled={saveBusy} onClick={() => void save()}>
                   {saveBusy ? "Salvando…" : "Salvar treino"}
                 </Button>

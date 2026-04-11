@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { exerciseVideoCaption } from "@/lib/exercise-video-source";
 import { fileVideoUrl, youtubeEmbedUrl, youtubeVideoId } from "@/lib/api";
 
 type Props = {
   title: string;
   videoUrl: string | null;
   videoFileKey: string | null;
+  /** Nome do arquivo enviado (quando houver). */
+  videoOriginalName?: string | null;
   /** Capa do exercício (URL) ou miniatura do primeiro frame. */
   posterUrl: string | null;
   /** Miniatura menor na ficha (lista de exercícios). */
@@ -19,13 +22,21 @@ function exitFullscreen() {
   doc.webkitExitFullscreen?.();
 }
 
-export function ExerciseVideoPanel({ title, videoUrl, videoFileKey, posterUrl, compact }: Props) {
+export function ExerciseVideoPanel({
+  title,
+  videoUrl,
+  videoFileKey,
+  videoOriginalName,
+  posterUrl,
+  compact,
+}: Props) {
   const fileSrc = fileVideoUrl(videoFileKey);
   const ytEmbed = youtubeEmbedUrl(videoUrl);
   const ytId = youtubeVideoId(videoUrl);
   const directUrl = !fileSrc && !ytEmbed && videoUrl?.trim() ? videoUrl.trim() : null;
 
   const [open, setOpen] = useState(false);
+  const sourceCaption = exerciseVideoCaption(videoUrl, videoFileKey, videoOriginalName ?? null);
 
   if (!fileSrc && !ytEmbed && !directUrl) return null;
 
@@ -66,6 +77,11 @@ export function ExerciseVideoPanel({ title, videoUrl, videoFileKey, posterUrl, c
           <span className={playClass}>▶</span>
         </span>
       </button>
+      {compact && sourceCaption && (
+        <p className="mt-1 max-w-[92px] whitespace-pre-line break-words text-center text-[10px] leading-tight text-ink-800/75">
+          {sourceCaption}
+        </p>
+      )}
 
       {open && (
         <VideoFullscreenOverlay

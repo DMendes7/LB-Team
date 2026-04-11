@@ -25,6 +25,13 @@ import { PrismaService } from "../prisma/prisma.service";
 
 const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-msvideo"]);
 
+function sanitizeVideoOriginalName(name: string | undefined): string | null {
+  if (!name?.trim()) return null;
+  const base = name.replace(/^.*[/\\]/, "").trim();
+  if (!base) return null;
+  return base.slice(0, 240);
+}
+
 const exerciseUpdateKeys = new Set([
   "name",
   "category",
@@ -151,7 +158,11 @@ export class ExercisesTrainerController {
     const key = `exercises/${file.filename}`;
     return this.prisma.exercise.update({
       where: { id },
-      data: { videoFileKey: key, videoUrl: null },
+      data: {
+        videoFileKey: key,
+        videoUrl: null,
+        videoOriginalName: sanitizeVideoOriginalName(file.originalname),
+      },
       include: { substitutionsFrom: { include: { substitute: true } } },
     });
   }
@@ -166,7 +177,7 @@ export class ExercisesTrainerController {
     }
     return this.prisma.exercise.update({
       where: { id },
-      data: { videoFileKey: null },
+      data: { videoFileKey: null, videoOriginalName: null },
       include: { substitutionsFrom: { include: { substitute: true } } },
     });
   }

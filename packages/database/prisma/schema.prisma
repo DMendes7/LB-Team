@@ -210,6 +210,8 @@ model Exercise {
   videoUrl           String? @map("video_url")
   /// Arquivo enviado (servido em GET /files/{videoFileKey}), ex.: exercises/abc.mp4
   videoFileKey       String? @map("video_file_key")
+  /// Nome original do arquivo no upload (exibição para personal e aluna).
+  videoOriginalName  String? @map("video_original_name")
   imageUrl           String? @map("image_url")
   equipment          String? @db.Text
   contraindications  String? @db.Text @map("contraindications")

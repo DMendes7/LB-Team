@@ -29,6 +29,7 @@ type WorkoutRes = {
         name: string;
         videoUrl: string | null;
         videoFileKey: string | null;
+        videoOriginalName: string | null;
         imageUrl: string | null;
         instructions: string | null;
         substitutionsFrom: { substitute: { id: string; name: string } }[];
@@ -147,11 +148,9 @@ export default function StudentWorkoutSessionPage() {
                         title={row.exercise.name}
                         videoUrl={row.exercise.videoUrl}
                         videoFileKey={row.exercise.videoFileKey}
+                        videoOriginalName={row.exercise.videoOriginalName}
                         posterUrl={row.exercise.imageUrl}
                       />
-                      <p className="mt-1 max-w-[5.5rem] text-center text-[9px] leading-tight text-ink-800/50 sm:text-[10px]">
-                        Toque no vídeo para tela cheia
-                      </p>
                     </div>
                   )}
                 </div>

@@ -30,6 +30,55 @@ function parseMonthKey(month?: string): { y: number; m: number } {
   return { y: Number(ys), m: Number(ms) };
 }
 
+function endOfWeekUtc(weekStart: Date): Date {
+  const e = new Date(weekStart);
+  e.setUTCDate(e.getUTCDate() + 6);
+  e.setUTCHours(23, 59, 59, 999);
+  return e;
+}
+
+function utcDateOnlyFromParts(y: number, month0: number, day: number): Date {
+  return new Date(Date.UTC(y, month0, day));
+}
+
+/** Lista YYYY-MM-DD de cada dia entre from e to (inclusive), em UTC. */
+function enumerateDaysInclusiveUtc(from: Date, to: Date): string[] {
+  const out: string[] = [];
+  const start = utcDateOnlyFromParts(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  const end = utcDateOnlyFromParts(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+  const cur = new Date(start.getTime());
+  while (cur.getTime() <= end.getTime()) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+const REPORT_TZ = "America/Sao_Paulo";
+
+/** Interpreta YYYY-MM-DD como dia no horário de Brasília e retorna instantes para query no banco. */
+function brDayBoundsUtc(ymd: string): { start: Date; end: Date } {
+  const start = new Date(`${ymd}T00:00:00-03:00`);
+  const end = new Date(`${ymd}T23:59:59.999-03:00`);
+  return { start, end };
+}
+
+function completionLocalDayKey(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: REPORT_TZ });
+}
+
+/** Dias corridos entre dois YYYY-MM-DD (inclusive), calendário em America/Sao_Paulo. */
+function enumerateLocalDaysInclusive(fromYmd: string, toYmd: string): string[] {
+  const out: string[] = [];
+  let cur = new Date(`${fromYmd}T12:00:00-03:00`);
+  const end = new Date(`${toYmd}T12:00:00-03:00`);
+  while (cur.getTime() <= end.getTime()) {
+    out.push(cur.toLocaleDateString("en-CA", { timeZone: REPORT_TZ }));
+    cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return out;
+}
+
 @Controller("trainer")
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.TRAINER, Role.ADMIN)
@@ -40,53 +89,229 @@ export class TrainerController {
   ) {}
 
   @Get("dashboard")
-  async dashboard(@CurrentUser() u: JwtUser) {
+  async dashboard(
+    @CurrentUser() u: JwtUser,
+    @Query("from") fromQ?: string,
+    @Query("to") toQ?: string,
+    @Query("groupId") groupIdQ?: string,
+    @Query("studentId") studentIdQ?: string,
+  ) {
     const links = await this.prisma.trainerStudentLink.findMany({
       where: { trainerId: u.sub },
       include: {
-        student: {
-          include: {
-            studentProfile: true,
-            userLevel: true,
-            streakState: true,
-            workoutCompletions: { orderBy: { completedAt: "desc" }, take: 1 },
-          },
-        },
+        student: { select: { id: true, name: true, email: true } },
       },
     });
 
-    const weekStart = startOfWeekUtc(new Date());
-    const lowFrequency: typeof links = [];
-    const streakRisk: typeof links = [];
-    const streakLost: typeof links = [];
-    const weeklyHit: typeof links = [];
-
-    for (const l of links) {
-      const s = l.student;
-      const log = await this.prisma.weeklyFrequencyLog.findUnique({
-        where: { userId_weekStart: { userId: s.id, weekStart } },
-      });
-      const target = this.gamification.weeklyTargetCount(s.studentProfile?.weeklyTarget);
-      const done = log?.completedCount ?? 0;
-      if (done < target && done < Math.max(1, target - 1)) lowFrequency.push(l);
-
-      const pres = await this.gamification.resolveWorkoutStreakPresentation(s.id);
-      if (pres.atRisk) streakRisk.push(l);
-      if (pres.hadWorkout && !pres.fireOn && (pres.daysSinceLastWorkout ?? 0) >= 2) streakLost.push(l);
-      if (log?.metaGoalMet) weeklyHit.push(l);
-    }
+    const linkByStudentId = new Map(links.map((l) => [l.studentId, l]));
 
     const groups = await this.prisma.workoutGroup.findMany({
       where: { trainerId: u.sub },
       include: { _count: { select: { members: true } }, template: true },
+      orderBy: { name: "asc" },
     });
 
+    let filterMeta: {
+      scope: "all" | "group" | "student";
+      groupId: string | null;
+      groupName: string | null;
+      studentId: string | null;
+      studentName: string | null;
+    } = { scope: "all", groupId: null, groupName: null, studentId: null, studentName: null };
+
+    let scopedStudentIds: string[] = links.map((l) => l.studentId);
+
+    if (studentIdQ?.trim()) {
+      const sid = studentIdQ.trim();
+      if (!linkByStudentId.has(sid)) {
+        throw new BadRequestException("Aluna não encontrada ou sem vínculo com você.");
+      }
+      if (groupIdQ?.trim()) {
+        const inGroup = await this.prisma.workoutGroupUser.findFirst({
+          where: { groupId: groupIdQ.trim(), studentId: sid, group: { trainerId: u.sub } },
+        });
+        if (!inGroup) throw new BadRequestException("Esta aluna não pertence ao grupo selecionado.");
+      }
+      scopedStudentIds = [sid];
+      filterMeta = {
+        scope: "student",
+        groupId: groupIdQ?.trim() || null,
+        groupName: groupIdQ?.trim() ? groups.find((g) => g.id === groupIdQ.trim())?.name ?? null : null,
+        studentId: sid,
+        studentName: (linkByStudentId.get(sid)!.student.name ?? linkByStudentId.get(sid)!.student.email ?? "Aluna").trim(),
+      };
+    } else if (groupIdQ?.trim()) {
+      const gid = groupIdQ.trim();
+      const g = groups.find((x) => x.id === gid);
+      if (!g) throw new BadRequestException("Grupo não encontrado.");
+      const members = await this.prisma.workoutGroupUser.findMany({
+        where: { groupId: gid },
+        select: { studentId: true },
+      });
+      const memberSet = new Set(members.map((m) => m.studentId));
+      scopedStudentIds = links.map((l) => l.studentId).filter((id) => memberSet.has(id));
+      filterMeta = {
+        scope: "group",
+        groupId: gid,
+        groupName: g.name,
+        studentId: null,
+        studentName: null,
+      };
+    }
+
+    const activeStudents = scopedStudentIds.length;
+
+    const explicitRange = !!(fromQ && toQ && /^\d{4}-\d{2}-\d{2}$/.test(fromQ) && /^\d{4}-\d{2}-\d{2}$/.test(toQ));
+
+    let from: Date;
+    let to: Date;
+    let activityDayKeys: string[];
+    const dayKey = (d: Date) => (explicitRange ? completionLocalDayKey(d) : d.toISOString().slice(0, 10));
+
+    if (explicitRange) {
+      if (fromQ! > toQ!) {
+        throw new BadRequestException("Data inicial deve ser anterior ou igual à final.");
+      }
+      const maxMs = 400 * 24 * 60 * 60 * 1000;
+      const startB = brDayBoundsUtc(fromQ!).start;
+      const endB = brDayBoundsUtc(toQ!).end;
+      if (endB.getTime() - startB.getTime() > maxMs) {
+        throw new BadRequestException("Intervalo máximo: 400 dias.");
+      }
+      from = startB;
+      to = endB;
+      activityDayKeys = enumerateLocalDaysInclusive(fromQ!, toQ!);
+    } else {
+      const ws = startOfWeekUtc(new Date());
+      from = ws;
+      to = endOfWeekUtc(ws);
+      const fromDay = utcDateOnlyFromParts(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+      const toDay = utcDateOnlyFromParts(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+      activityDayKeys = enumerateDaysInclusiveUtc(fromDay, toDay);
+    }
+
+    let fromDayForCheckin: Date;
+    let toDayForCheckin: Date;
+    if (explicitRange) {
+      fromDayForCheckin = new Date(`${fromQ!}T00:00:00.000Z`);
+      toDayForCheckin = new Date(`${toQ!}T00:00:00.000Z`);
+    } else {
+      fromDayForCheckin = utcDateOnlyFromParts(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+      toDayForCheckin = utcDateOnlyFromParts(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+    }
+
+    if (activeStudents === 0) {
+      return {
+        activeStudents: 0,
+        filter: filterMeta,
+        period: {
+          from: from.toISOString(),
+          to: to.toISOString(),
+          fromDay: activityDayKeys[0] ?? fromDayForCheckin.toISOString().slice(0, 10),
+          toDay: activityDayKeys[activityDayKeys.length - 1] ?? toDayForCheckin.toISOString().slice(0, 10),
+        },
+        metrics: {
+          workoutsCompleted: 0,
+          studentsTrained: 0,
+          engagementRate: 0,
+          studentsInactive: 0,
+          totalMinutes: 0,
+          avgMinutesPerWorkout: 0,
+          avgWorkoutsPerTrainingStudent: 0,
+          checkInsCount: 0,
+          studentsWithCheckIn: 0,
+        },
+        activityByDay: activityDayKeys.map((date) => ({ date, count: 0 })),
+        inactiveSample: [] as { id: string; name: string }[],
+        groups,
+      };
+    }
+
+    const completions = await this.prisma.workoutCompletion.findMany({
+      where: {
+        studentId: { in: scopedStudentIds },
+        completedAt: { not: null, gte: from, lte: to },
+      },
+      select: { studentId: true, completedAt: true, durationSeconds: true },
+    });
+
+    const trained = new Set(completions.map((c) => c.studentId));
+    const workoutsCompleted = completions.length;
+    const studentsTrained = trained.size;
+    const engagementRate =
+      activeStudents > 0 ? Math.round((studentsTrained / activeStudents) * 1000) / 10 : 0;
+    const studentsInactive = activeStudents - studentsTrained;
+
+    let totalSec = 0;
+    for (const c of completions) {
+      totalSec += c.durationSeconds ?? 0;
+    }
+    const totalMinutes = Math.round(totalSec / 60);
+    const avgMinutesPerWorkout =
+      workoutsCompleted > 0 ? Math.round((totalSec / workoutsCompleted / 60) * 10) / 10 : 0;
+    const avgWorkoutsPerTrainingStudent =
+      studentsTrained > 0 ? Math.round((workoutsCompleted / studentsTrained) * 10) / 10 : 0;
+
+    const countByDay = new Map<string, number>();
+    for (const c of completions) {
+      if (!c.completedAt) continue;
+      const key = dayKey(c.completedAt);
+      countByDay.set(key, (countByDay.get(key) ?? 0) + 1);
+    }
+
+    const activityByDay = activityDayKeys.map((date) => ({
+      date,
+      count: countByDay.get(date) ?? 0,
+    }));
+
+    const checkInsCount = await this.prisma.dailyCheckin.count({
+      where: {
+        userId: { in: scopedStudentIds },
+        date: { gte: fromDayForCheckin, lte: toDayForCheckin },
+      },
+    });
+
+    const checkInUsers = await this.prisma.dailyCheckin.findMany({
+      where: {
+        userId: { in: scopedStudentIds },
+        date: { gte: fromDayForCheckin, lte: toDayForCheckin },
+      },
+      select: { userId: true },
+      distinct: ["userId"],
+    });
+    const studentsWithCheckIn = checkInUsers.length;
+
+    const scopedLinks = links.filter((l) => scopedStudentIds.includes(l.studentId));
+    const inactiveSample = scopedLinks
+      .filter((l) => !trained.has(l.studentId))
+      .slice(0, 10)
+      .map((l) => ({
+        id: l.student.id,
+        name: (l.student.name ?? l.student.email ?? "Aluna").trim(),
+      }));
+
     return {
-      activeStudents: links.length,
-      lowFrequency,
-      streakRisk,
-      streakLost,
-      weeklyHit,
+      activeStudents,
+      filter: filterMeta,
+      period: {
+        from: from.toISOString(),
+        to: to.toISOString(),
+        fromDay: activityDayKeys[0] ?? fromDayForCheckin.toISOString().slice(0, 10),
+        toDay: activityDayKeys[activityDayKeys.length - 1] ?? toDayForCheckin.toISOString().slice(0, 10),
+      },
+      metrics: {
+        workoutsCompleted,
+        studentsTrained,
+        engagementRate,
+        studentsInactive,
+        totalMinutes,
+        avgMinutesPerWorkout,
+        avgWorkoutsPerTrainingStudent,
+        checkInsCount,
+        studentsWithCheckIn,
+      },
+      activityByDay,
+      inactiveSample,
       groups,
     };
   }
@@ -555,7 +780,7 @@ export class TrainerController {
           name: `${label} (${student?.name ?? "Aluna"})`,
           description: "Ficha exclusiva desta aluna — edite por “Editar ficha” na lista dela.",
           days: {
-            create: [{ dayIndex: 0, name: "Dia 1", exercises: { create: [] } }],
+            create: [{ dayIndex: 0, name: "Treino", exercises: { create: [] } }],
           },
         },
       });
