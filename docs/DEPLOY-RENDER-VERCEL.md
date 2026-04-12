@@ -8,7 +8,7 @@ Roteiro para subir o **backend (NestJS)** no Render e o **frontend (Next.js)** n
 
 ## Blueprint (`render.yaml`)
 
-Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Node 20, free), build/start do monorepo, `preDeploy` com `db:migrate:deploy`, `FRONTEND_URL=https://lbteam.vercel.app`, `JWT_SECRET` gerado pelo Render, e **`DATABASE_URL`** para você colar a URL do **Neon** ao aplicar o Blueprint.
+Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Node 20, free), build/start do monorepo, **`startCommand`** que roda `db:migrate:deploy` antes do Nest (o plano free não permite `preDeployCommand`), `FRONTEND_URL=https://lbteam.vercel.app`, `JWT_SECRET` gerado pelo Render, e **`DATABASE_URL`** para você colar a URL do **Neon** ao aplicar o Blueprint.
 
 ### Passos no Render
 
@@ -22,7 +22,7 @@ Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Nod
    npm ci && npm run db:seed
    ```
 
-   (As migrações já rodam no `preDeploy` do Render; o seed cria admin/personal/nutri demo.)
+   (As migrações rodam no **start** da API, antes do servidor subir; o seed cria admin/personal/nutri demo.)
 
 ---
 
@@ -30,7 +30,7 @@ Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Nod
 
 1. Banco (Neon) → URL de conexão  
 2. API no Render → URL pública `https://….onrender.com`  
-3. Migrações + seed (uma vez) contra o Neon — *com Blueprint, migrate já vai no `preDeploy`; falta só o seed.*  
+3. Migrações + seed (uma vez) contra o Neon — *com Blueprint, `migrate deploy` roda no **start**; falta só o **seed** manual.*  
 4. Site na Vercel com `NEXT_PUBLIC_API_URL` = URL da API  
 5. `FRONTEND_URL` na API = `https://lbteam.vercel.app` — *já está no `render.yaml`.*
 
