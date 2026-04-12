@@ -24,16 +24,29 @@ Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Nod
 
    (As migrações rodam no **start** da API, antes do servidor subir; o seed cria admin/personal/nutri demo.)
 
-### Se o deploy falhou com migration (P3018 / “failed migrations”)
+### Se o deploy falhou com migration (P3009 / P3018 / “failed migrations”)
 
-Depois de corrigir a ordem das migrations no repositório, o Neon pode ainda ter o registro da migration antiga com falha. Para um banco **só de teste/staging**, o mais simples é no **SQL Editor** do Neon: apagar o schema e deixar o próximo deploy recriar tudo:
+O **Neon guarda** na tabela `_prisma_migrations` o nome da migration que falhou. Trocar o nome da pasta no Git **não** apaga esse registro — o Prisma continua bloqueando com `The '20260403213000_workout_prescription_blocks' migration … failed`.
+
+**Passo 1 — tentar só remover o registro da migration antiga** (Neon → **SQL Editor**):
+
+```sql
+DELETE FROM "_prisma_migrations"
+WHERE migration_name = '20260403213000_workout_prescription_blocks';
+```
+
+Salve, depois **redeploy** no Render. O deploy vai aplicar as migrations na ordem certa (incluindo `20260403220100_workout_prescription_blocks` no repositório atual).
+
+**Passo 2 — se ainda der erro** ou o banco estiver inconsistente, para ambiente **sem dados importantes**:
 
 ```sql
 DROP SCHEMA public CASCADE;
 CREATE SCHEMA public;
 ```
 
-Depois faça **redeploy** no Render. Em produção com dados que não pode apagar, use [`prisma migrate resolve`](https://www.prisma.io/docs/guides/migrate/production-troubleshooting) em vez de dropar o schema.
+Depois **redeploy** no Render.
+
+Em produção com dados que não pode apagar, use [`prisma migrate resolve`](https://www.prisma.io/docs/guides/migrate/production-troubleshooting) em vez de apagar linhas à mão sem critério.
 
 ---
 

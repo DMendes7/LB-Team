@@ -10,7 +10,7 @@
     "db:migrate": "npm run migrate --workspace=@lb-team/database",
     "db:migrate:deploy": "npm run migrate:deploy --workspace=@lb-team/database",
     "db:push": "npm run push --workspace=@lb-team/database",
-    "db:seed": "npm run seed --workspace=@lb-team/database",
+    "db:seed": "npm run db:generate && npm run seed --workspace=@lb-team/database",
     "db:remove-demo-students": "npm run remove-demo-students --workspace=@lb-team/database",
     "db:remove-all-students": "npm run remove-all-students --workspace=@lb-team/database",
     "setup:local": "bash scripts/setup-local.sh",
