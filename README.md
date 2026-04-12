@@ -76,7 +76,7 @@ Senha comum: **`Senha123!`**
 - `personal@lbteam.app` — TRAINER  
 - `nutri@lbteam.app` — NUTRITIONIST  
 
-Não há mais alunas fixas no seed. **Novas contas** (cadastro na landing) são ligadas automaticamente ao **primeiro personal** e à **primeira nutricionista** do sistema (ou aos e-mails em `DEFAULT_TRAINER_EMAIL` / `DEFAULT_NUTRITIONIST_EMAIL` no `apps/api/.env`).
+Não há mais alunas fixas no seed. **Novas contas** (cadastro na landing) são ligadas a **`personal@lbteam.app`** e **`nutri@lbteam.app`** (ou aos e-mails em `DEFAULT_TRAINER_EMAIL` / `DEFAULT_NUTRITIONIST_EMAIL` no `apps/api/.env`, se definidos). A cada `db:seed`, personal e nutri têm **senha e perfil redefinidos** para os valores fixos acima.
 
 O seed remove, se existirem, as contas demo antigas `aluna1@lbteam.app` … `aluna4@lbteam.app`.
 

@@ -1,0 +1,32 @@
+# Render Blueprint — API LB Team (NestJS)
+# Site (Vercel): https://lbteam.vercel.app
+#
+# Ao criar/atualizar o Blueprint no Render:
+#   1) Informe DATABASE_URL do Neon (connection string com ?sslmode=require se pedido).
+#   2) JWT_SECRET é gerado automaticamente (generateValue).
+#   3) Copie a URL pública da API (https://….onrender.com) e defina na Vercel:
+#      NEXT_PUBLIC_API_URL = essa URL (sem barra no final) → Redeploy no site.
+#   4) Rode o seed uma vez (máquina local ou Shell do Render), com DATABASE_URL:
+#      npm ci && npm run db:seed
+#
+# Banco: use Neon (grátis). Postgres no Render não está neste arquivo.
+
+version: "1"
+
+services:
+  - type: web
+    name: lb-team-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run db:generate && npm run build --workspace=@lb-team/api
+    preDeployCommand: npm run db:migrate:deploy
+    startCommand: npm run start:prod --workspace=@lb-team/api
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: FRONTEND_URL
+        value: https://lbteam.vercel.app
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false

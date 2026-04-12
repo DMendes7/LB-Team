@@ -3,6 +3,11 @@ import * as bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
+/** Senha e contas fixas de personal/nutri (reaplicadas a cada seed). */
+const SEED_FIXED_PASSWORD = "Senha123!";
+const TRAINER_EMAIL = "personal@lbteam.app";
+const NUTRITIONIST_EMAIL = "nutri@lbteam.app";
+
 /** E-mails das alunas demo antigas (removidas a cada seed). */
 const DEMO_STUDENT_EMAILS = ["aluna1@lbteam.app", "aluna2@lbteam.app", "aluna3@lbteam.app", "aluna4@lbteam.app"];
 
@@ -13,7 +18,7 @@ async function main() {
     where: { email: { in: DEMO_STUDENT_EMAILS } },
   });
 
-  const password = await bcrypt.hash("Senha123!", 10);
+  const password = await bcrypt.hash(SEED_FIXED_PASSWORD, 10);
 
   const admin = await prisma.user.upsert({
     where: { email: "admin@lbteam.app" },
@@ -28,10 +33,15 @@ async function main() {
   });
 
   const trainer = await prisma.user.upsert({
-    where: { email: "personal@lbteam.app" },
-    update: {},
+    where: { email: TRAINER_EMAIL },
+    update: {
+      passwordHash: password,
+      name: "Marina Personal",
+      phone: "+5511999990001",
+      role: Role.TRAINER,
+    },
     create: {
-      email: "personal@lbteam.app",
+      email: TRAINER_EMAIL,
       passwordHash: password,
       name: "Marina Personal",
       phone: "+5511999990001",
@@ -41,10 +51,15 @@ async function main() {
   });
 
   const nutritionist = await prisma.user.upsert({
-    where: { email: "nutri@lbteam.app" },
-    update: {},
+    where: { email: NUTRITIONIST_EMAIL },
+    update: {
+      passwordHash: password,
+      name: "Dra. Helena Nutri",
+      phone: "+5511999990002",
+      role: Role.NUTRITIONIST,
+    },
     create: {
-      email: "nutri@lbteam.app",
+      email: NUTRITIONIST_EMAIL,
       passwordHash: password,
       name: "Dra. Helena Nutri",
       phone: "+5511999990002",
@@ -226,8 +241,9 @@ async function main() {
     create: { key: "streak_activity_types", value: ["WORKOUT_COMPLETE", "DAILY_CHECKIN", "NUTRITION_VIEW", "DISPOSITION_LOG"] },
   });
 
-  console.log("Seed OK — admin/personal/nutri: Senha123! | Alunas demo (aluna1–4) removidas se existirem.");
-  console.log("Novas alunas são vinculadas ao primeiro personal/nutri (ou DEFAULT_*_EMAIL na API).");
+  console.log(`Seed OK — admin/personal/nutri: ${SEED_FIXED_PASSWORD} | Alunas demo (aluna1–4) removidas se existirem.`);
+  console.log(`Personal/nutri fixos: ${TRAINER_EMAIL}, ${NUTRITIONIST_EMAIL} (senha resetada a cada seed).`);
+  console.log("Novas alunas: vínculo ao personal/nutri padrão (env DEFAULT_* ou e-mails fixos acima).");
   console.log({ admin: admin.email, trainer: trainer.email, nutritionist: nutritionist.email });
 }
 

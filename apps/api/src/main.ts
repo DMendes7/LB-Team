@@ -13,8 +13,11 @@ for (const d of uploadDirs) {
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.useStaticAssets(join(process.cwd(), "uploads"), { prefix: "/files/" });
+  const corsOrigins = process.env.FRONTEND_URL?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: process.env.FRONTEND_URL?.split(",") ?? ["http://localhost:3000"],
+    origin: corsOrigins?.length ? corsOrigins : ["http://localhost:3000"],
     credentials: true,
   });
   app.useGlobalPipes(
@@ -24,7 +27,7 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
-  const port = process.env.API_PORT ?? 4000;
+  const port = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
   await app.listen(port);
   console.log(`API http://localhost:${port}`);
 }
