@@ -13,7 +13,7 @@ Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Nod
 ### Passos no Render
 
 1. [Dashboard](https://dashboard.render.com) → **New** → **Blueprint** → conecte o repositório Git.  
-2. O Render lê `render.yaml`. Quando pedir, informe **`DATABASE_URL`** (connection string do Neon).  
+2. O Render lê `render.yaml`. Quando pedir, informe **`DATABASE_URL`** (Neon pooled) e **`DIRECT_URL`** (Neon direct, sem `-pooler`).  
 3. Após o deploy, anote a URL da API, ex.: `https://lb-team-api.onrender.com`.  
 4. **Vercel** → projeto **lbteam** → **Settings → Environment Variables** → `NEXT_PUBLIC_API_URL` = URL da API (https, **sem** `/` no final) → **Redeploy** (o Next embute essa variável no build).  
 5. **Seed (uma vez):** na sua máquina, com `DATABASE_URL` do Neon na raiz do repo:
@@ -65,8 +65,12 @@ Assim o build do Next já “enxerga” a API correta (`NEXT_PUBLIC_*` é embuti
 ## 1. PostgreSQL (Neon)
 
 1. Crie um projeto em [neon.tech](https://neon.tech).  
-2. Copie a **connection string** Postgres (modo **pooling** costuma ser bom para serverless/PaaS; se der erro de SSL, use a string que o Neon indica com `?sslmode=require`).  
-3. Guarde como `DATABASE_URL` — será a mesma na API e nos comandos locais de migrate.
+2. No painel **Connection details**, copie **duas** URLs:
+   - **Pooled** (com `-pooler` no host) → **`DATABASE_URL`** na API (runtime do Prisma).  
+   - **Direct** (sem pooler, ou aba “Direct connection”) → **`DIRECT_URL`** (só para `prisma migrate deploy` — evita timeout em `pg_advisory_lock` com o pooler).  
+3. Inclua `?sslmode=require` (e o que o Neon indicar) nas duas, se necessário.
+
+Sem **`DIRECT_URL`**, o deploy no Render pode falhar em `migrate deploy` com *Timed out trying to acquire a postgres advisory lock*.
 
 ---
 
@@ -97,7 +101,8 @@ Assim o build do Next já “enxerga” a API correta (`NEXT_PUBLIC_*` é embuti
 | Nome | Valor / observação |
 |------|---------------------|
 | `NODE_VERSION` | `20` (ou a mesma do `engines` do `package.json`) |
-| `DATABASE_URL` | Connection string do Neon (a mesma do passo 1) |
+| `DATABASE_URL` | Neon **pooled** (connection pooling ligado) |
+| `DIRECT_URL` | Neon **direct** (sem pooler) — obrigatório para migrations |
 | `JWT_SECRET` | String longa e aleatória (não reutilize a de dev) |
 | `FRONTEND_URL` | Produção: **`https://lbteam.vercel.app`** (sem barra no final). No Blueprint já vem fixo. Se precisar de mais de um domínio, separe por vírgula. |
 | `PORT` | **Não defina manualmente** — o Render injeta. A API já lê `PORT` ou `API_PORT`. |

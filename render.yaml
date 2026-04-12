@@ -2,7 +2,8 @@
 # Site (Vercel): https://lbteam.vercel.app
 #
 # Ao criar/atualizar o Blueprint no Render:
-#   1) Informe DATABASE_URL do Neon (connection string com ?sslmode=require se pedido).
+#   1) Informe DATABASE_URL (Neon com pooler) e DIRECT_URL (Neon "Direct connection", sem -pooler).
+#      Migrações usam DIRECT_URL para não dar timeout no advisory lock com o pooler.
 #   2) JWT_SECRET é gerado automaticamente (generateValue).
 #   3) Copie a URL pública da API (https://….onrender.com) e defina na Vercel:
 #      NEXT_PUBLIC_API_URL = essa URL (sem barra no final) → Redeploy no site.
@@ -31,4 +32,6 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
         sync: false
