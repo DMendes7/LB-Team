@@ -24,6 +24,17 @@ Na raiz do repo existe **`render.yaml`**: define o serviço **lb-team-api** (Nod
 
    (As migrações rodam no **start** da API, antes do servidor subir; o seed cria admin/personal/nutri demo.)
 
+### Se o deploy falhou com migration (P3018 / “failed migrations”)
+
+Depois de corrigir a ordem das migrations no repositório, o Neon pode ainda ter o registro da migration antiga com falha. Para um banco **só de teste/staging**, o mais simples é no **SQL Editor** do Neon: apagar o schema e deixar o próximo deploy recriar tudo:
+
+```sql
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+```
+
+Depois faça **redeploy** no Render. Em produção com dados que não pode apagar, use [`prisma migrate resolve`](https://www.prisma.io/docs/guides/migrate/production-troubleshooting) em vez de dropar o schema.
+
 ---
 
 ## Ordem recomendada (manual, se não usar Blueprint)
