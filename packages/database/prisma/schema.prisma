@@ -228,8 +228,22 @@ model Exercise {
   substitutionsFrom ExerciseSubstitution[] @relation("PrimaryExercise")
   substitutionsTo   ExerciseSubstitution[] @relation("SubstituteExercise")
 
+  videoAsset ExerciseVideoAsset?
+
   workoutExercises     WorkoutExercise[]
   exerciseCompletions  ExerciseCompletion[]
+}
+
+model ExerciseVideoAsset {
+  exerciseId String @id @map("exercise_id")
+  key        String @unique
+  mimeType   String @map("mime_type")
+  sizeBytes  Int    @map("size_bytes")
+  data       Bytes
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
 }
 
 model ExerciseSubstitution {

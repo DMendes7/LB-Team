@@ -13,7 +13,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { diskStorage } from "multer";
+import { memoryStorage } from "multer";
 import { extname, join } from "path";
 import { existsSync, unlinkSync } from "fs";
 import { Role, FitnessLevel } from "@prisma/client";
@@ -46,7 +46,6 @@ const exerciseUpdateKeys = new Set([
   "contraindications",
   "tags",
   "technicalNotes",
-  "videoFileKey",
 ]);
 
 @Controller("trainer/exercises")
@@ -126,13 +125,7 @@ export class ExercisesTrainerController {
   @Post(":id/video")
   @UseInterceptors(
     FileInterceptor("file", {
-      storage: diskStorage({
-        destination: join(process.cwd(), "uploads", "exercises"),
-        filename: (_req, file, cb) => {
-          const ext = extname(file.originalname || "") || ".mp4";
-          cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 120 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         if (!VIDEO_MIMES.has(file.mimetype)) {
@@ -151,17 +144,27 @@ export class ExercisesTrainerController {
     if (!file) throw new BadRequestException("Arquivo obrigatório.");
     const ex = await this.prisma.exercise.findFirst({ where: { id, trainerId: u.sub } });
     if (!ex) throw new NotFoundException();
+    const ext = extname(file.originalname || "") || ".mp4";
+    const key = `exercises/${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`;
     if (ex.videoFileKey) {
       const oldPath = join(process.cwd(), "uploads", ex.videoFileKey);
       if (existsSync(oldPath)) unlinkSync(oldPath);
     }
-    const key = `exercises/${file.filename}`;
+    await this.prisma.exerciseVideoAsset.deleteMany({ where: { exerciseId: id } });
     return this.prisma.exercise.update({
       where: { id },
       data: {
         videoFileKey: key,
         videoUrl: null,
         videoOriginalName: sanitizeVideoOriginalName(file.originalname),
+        videoAsset: {
+          create: {
+            key,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            data: file.buffer,
+          },
+        },
       },
       include: { substitutionsFrom: { include: { substitute: true } } },
     });
@@ -175,6 +178,7 @@ export class ExercisesTrainerController {
       const p = join(process.cwd(), "uploads", ex.videoFileKey);
       if (existsSync(p)) unlinkSync(p);
     }
+    await this.prisma.exerciseVideoAsset.deleteMany({ where: { exerciseId: id } });
     return this.prisma.exercise.update({
       where: { id },
       data: { videoFileKey: null, videoOriginalName: null },
@@ -189,7 +193,19 @@ export class ExercisesTrainerController {
     for (const [k, v] of Object.entries(rest)) {
       if (exerciseUpdateKeys.has(k)) data[k] = v;
     }
+    const nextVideoUrl = typeof data.videoUrl === "string" ? data.videoUrl.trim() : null;
+    const shouldReplaceUploadedFileWithLink = !!nextVideoUrl;
     if (Object.keys(data).length) {
+      if (shouldReplaceUploadedFileWithLink) {
+        const ex = await this.prisma.exercise.findFirst({ where: { id, trainerId: u.sub } });
+        if (ex?.videoFileKey) {
+          const p = join(process.cwd(), "uploads", ex.videoFileKey);
+          if (existsSync(p)) unlinkSync(p);
+        }
+        await this.prisma.exerciseVideoAsset.deleteMany({ where: { exerciseId: id } });
+        data.videoFileKey = null;
+        data.videoOriginalName = null;
+      }
       await this.prisma.exercise.updateMany({ where: { id, trainerId: u.sub }, data: data as object });
     }
     if (Array.isArray(substituteExerciseIds)) {

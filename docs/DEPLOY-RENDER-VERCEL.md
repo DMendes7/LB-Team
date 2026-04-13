@@ -184,7 +184,7 @@ Teste: abra [https://lbteam.vercel.app](https://lbteam.vercel.app), login com us
 ## Limitações (free Render)
 
 - **Cold start:** após inatividade, a primeira requisição pode demorar.  
-- **Disco:** uploads de vídeo em `uploads/` são **efêmeros** em redeploy; para produção séria, use armazenamento de objetos (ex.: R2/S3) no futuro.
+- **Vídeos de exercício:** novos uploads ficam persistidos no Postgres/Neon e são servidos pela API; o fallback em `uploads/` existe só para arquivos legados/local dev. Se o volume crescer, migre para object storage (ex.: R2/S3).
 
 ---
 

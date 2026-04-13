@@ -118,7 +118,7 @@ Navegação responsiva com **bottom bar** no mobile e **AppShell** por papel.
 ## Próximos passos sugeridos (produção)
 
 - Cookies httpOnly + CSRF ou BFF para token; hoje o demo usa `localStorage`.
-- Upload real de vídeo (S3 / Azure Blob) e URLs assinadas.
+- Migrar vídeos de exercício do Postgres/Neon para object storage (S3 / Azure Blob) e URLs assinadas conforme o volume crescer.
 - Recuperação de senha com fila de e-mail.
 - Testes e2e (Playwright) e contrato OpenAPI gerado a partir de DTOs Nest.
 
